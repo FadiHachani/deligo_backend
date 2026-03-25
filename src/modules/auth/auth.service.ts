@@ -33,7 +33,9 @@ export class AuthService {
     private readonly configService: ConfigService,
   ) {}
 
-  async requestOtp(phone: string): Promise<{ message: string; expiresIn: number }> {
+  async requestOtp(
+    phone: string,
+  ): Promise<{ message: string; expiresIn: number }> {
     const otpTtl = this.configService.get<number>('OTP_TTL_SECONDS', 300);
     const cooldown = this.configService.get<number>('OTP_COOLDOWN_SECONDS', 60);
 
@@ -62,7 +64,11 @@ export class AuthService {
 
     const expiresAt = new Date(Date.now() + otpTtl * 1000);
     await this.otpRepo.save(
-      this.otpRepo.create({ phone, code_hash: codeHash, expires_at: expiresAt }),
+      this.otpRepo.create({
+        phone,
+        code_hash: codeHash,
+        expires_at: expiresAt,
+      }),
     );
 
     console.log(`[OTP] ${phone}: ${code}`);
@@ -88,7 +94,10 @@ export class AuthService {
 
     if (otpToken.attempts >= maxAttempts) {
       throw new HttpException(
-        { code: 'TOO_MANY_ATTEMPTS', message: 'Too many OTP attempts, please request a new one' },
+        {
+          code: 'TOO_MANY_ATTEMPTS',
+          message: 'Too many OTP attempts, please request a new one',
+        },
         HttpStatus.TOO_MANY_REQUESTS,
       );
     }
@@ -164,7 +173,10 @@ export class AuthService {
   }
 
   private generateAccessToken(userId: string, role: UserRole): string {
-    const ttl = this.configService.get<string>('JWT_ACCESS_TTL', '15m') as `${number}${'s' | 'm' | 'h' | 'd'}`;
+    const ttl = this.configService.get<string>(
+      'JWT_ACCESS_TTL',
+      '15m',
+    ) as `${number}${'s' | 'm' | 'h' | 'd'}`;
     return this.jwtService.sign({ sub: userId, role }, { expiresIn: ttl });
   }
 
@@ -172,9 +184,7 @@ export class AuthService {
     const rawToken = uuidv4();
     const hash = this.hashToken(rawToken);
     const days = this.configService.get<number>('JWT_REFRESH_TTL_DAYS', 30);
-    const expiresAt = new Date(
-      Date.now() + days * 24 * 60 * 60 * 1000,
-    );
+    const expiresAt = new Date(Date.now() + days * 24 * 60 * 60 * 1000);
 
     await this.refreshTokenRepo.save(
       this.refreshTokenRepo.create({

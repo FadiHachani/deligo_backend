@@ -5,7 +5,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { DataSource, Not, Repository } from 'typeorm';
+import { DataSource, Repository } from 'typeorm';
 import { Bid } from '../../entities/bid.entity';
 import { TransportRequest } from '../../entities/transport-request.entity';
 import { Booking } from '../../entities/booking.entity';
@@ -140,11 +140,14 @@ export class BidsService {
         .createQueryBuilder()
         .update(Bid)
         .set({ status: BidStatus.REJECTED })
-        .where('request_id = :requestId AND id != :bidId AND status = :status', {
-          requestId: request.id,
-          bidId,
-          status: BidStatus.PENDING,
-        })
+        .where(
+          'request_id = :requestId AND id != :bidId AND status = :status',
+          {
+            requestId: request.id,
+            bidId,
+            status: BidStatus.PENDING,
+          },
+        )
         .execute();
 
       // Create booking
@@ -192,6 +195,33 @@ export class BidsService {
 
       return booking;
     });
+  }
+
+  async reject(bidId: string, clientId: string) {
+    const bid = await this.bidRepo.findOne({
+      where: { id: bidId },
+      relations: ['request'],
+    });
+    if (!bid) throw new NotFoundException('Bid not found');
+    if (bid.request.client_id !== clientId)
+      throw new ForbiddenException('Access denied');
+    if (bid.status !== BidStatus.PENDING) {
+      throw new BadRequestException({
+        code: 'BID_NOT_PENDING',
+        message: 'Only pending bids can be rejected',
+      });
+    }
+    bid.status = BidStatus.REJECTED;
+    const saved = await this.bidRepo.save(bid);
+
+    await this.notificationsService.create(
+      bid.driver_id,
+      'BID_REJECTED',
+      'Your bid was declined',
+      'The client has declined your bid on this request.',
+    );
+
+    return saved;
   }
 
   async withdraw(bidId: string, driverId: string) {

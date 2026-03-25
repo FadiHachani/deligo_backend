@@ -39,6 +39,13 @@ export class BidsController {
     return this.bidsService.accept(id, user.sub);
   }
 
+  @Post(':id/reject')
+  @UseGuards(RolesGuard)
+  @Roles(UserRole.CLIENT)
+  reject(@Param('id') id: string, @CurrentUser() user: JwtUser) {
+    return this.bidsService.reject(id, user.sub);
+  }
+
   @Post(':id/withdraw')
   @UseGuards(RolesGuard)
   @Roles(UserRole.DRIVER)
