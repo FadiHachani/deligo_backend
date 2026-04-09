@@ -1,7 +1,33 @@
+# Dependencies
 node_modules/
+
+# Build output
 dist/
+
+# Environment variables
 .env
-keys/
-*.local
+.env.*
+!.env.example
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS files
 .DS_Store
+Thumbs.db
+
+# Keys
+keys/
+
+# Logs
+*.log
+npm-debug.log*
+
+# Testing
 coverage/
+
+# Stress tests
+stress-test/
