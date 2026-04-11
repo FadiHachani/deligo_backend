@@ -35,7 +35,7 @@ export class AuthService {
 
   async requestOtp(
     phone: string,
-  ): Promise<{ message: string; expiresIn: number }> {
+  ): Promise<{ message: string; expiresIn: number; isExistingUser: boolean }> {
     const otpTtl = this.configService.get<number>('OTP_TTL_SECONDS', 300);
     const cooldown = this.configService.get<number>('OTP_COOLDOWN_SECONDS', 60);
 
@@ -117,6 +117,25 @@ export class AuthService {
     await this.otpRepo.delete({ id: otpToken.id });
 
     let user = await this.userRepo.findOne({ where: { phone } });
+    const isNewUser = !user;
+
+    if (isNewUser && !full_name) {
+      throw new HttpException(
+        {
+          code: 'FULL_NAME_REQUIRED',
+          message: 'Full name is required for new accounts',
+        },
+        HttpStatus.UNPROCESSABLE_ENTITY,
+      );
+    }
+
+    if (!isNewUser && full_name) {
+      throw new ConflictException({
+        code: 'PHONE_ALREADY_REGISTERED',
+        message: 'This phone number is already linked to an account',
+      });
+    }
+
     if (!user) {
       user = await this.userRepo.save(
         this.userRepo.create({
@@ -126,12 +145,6 @@ export class AuthService {
           email: email ?? null,
         }),
       );
-    } else {
-      if (full_name !== undefined) user.full_name = full_name;
-      if (email !== undefined) user.email = email;
-      if (full_name !== undefined || email !== undefined) {
-        user = await this.userRepo.save(user);
-      }
     }
 
     const accessToken = this.generateAccessToken(user.id, user.role);
