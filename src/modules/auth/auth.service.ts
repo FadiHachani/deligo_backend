@@ -3,6 +3,7 @@ import {
   HttpException,
   HttpStatus,
   Injectable,
+  NotFoundException,
   UnauthorizedException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
@@ -33,9 +34,61 @@ export class AuthService {
     private readonly configService: ConfigService,
   ) {}
 
-  async requestOtp(
+  async requestRegisterOtp(
     phone: string,
-  ): Promise<{ message: string; expiresIn: number; isExistingUser: boolean }> {
+  ): Promise<{ message: string; expiresIn: number }> {
+    const existingUser = await this.userRepo.findOne({ where: { phone } });
+    if (existingUser) {
+      throw new ConflictException({
+        code: 'PHONE_ALREADY_REGISTERED',
+        message: 'This phone number is already linked to an account',
+      });
+    }
+
+    return this.sendOtp(phone);
+  }
+
+  async requestLoginOtp(
+    phone: string,
+  ): Promise<{ message: string; expiresIn: number }> {
+    const existingUser = await this.userRepo.findOne({ where: { phone } });
+    if (!existingUser) {
+      throw new NotFoundException({
+        code: 'PHONE_NOT_FOUND',
+        message: 'No account found with this phone number',
+      });
+    }
+
+    return this.sendOtp(phone);
+  }
+
+  async verifyRegisterOtp(phone: string, code: string, full_name?: string, email?: string) {
+    const existingUser = await this.userRepo.findOne({ where: { phone } });
+    if (existingUser) {
+      throw new ConflictException({
+        code: 'PHONE_ALREADY_REGISTERED',
+        message: 'This phone number is already linked to an account',
+      });
+    }
+
+    return this.verifyOtpAndAuthenticate(phone, code, full_name, email);
+  }
+
+  async verifyLoginOtp(phone: string, code: string) {
+    const existingUser = await this.userRepo.findOne({ where: { phone } });
+    if (!existingUser) {
+      throw new NotFoundException({
+        code: 'PHONE_NOT_FOUND',
+        message: 'No account found with this phone number',
+      });
+    }
+
+    return this.verifyOtpAndAuthenticate(phone, code);
+  }
+
+  private async sendOtp(
+    phone: string,
+  ): Promise<{ message: string; expiresIn: number }> {
     const otpTtl = this.configService.get<number>('OTP_TTL_SECONDS', 300);
     const cooldown = this.configService.get<number>('OTP_COOLDOWN_SECONDS', 60);
 
@@ -71,13 +124,11 @@ export class AuthService {
       }),
     );
 
-    const existingUser = await this.userRepo.findOne({ where: { phone } });
-
     console.log(`[OTP] ${phone}: ${code}`);
-    return { message: 'OTP sent', expiresIn: otpTtl, isExistingUser: !!existingUser };
+    return { message: 'OTP sent', expiresIn: otpTtl };
   }
 
-  async verifyOtp(phone: string, code: string, full_name?: string, email?: string) {
+  private async verifyOtpAndAuthenticate(phone: string, code: string, full_name?: string, email?: string) {
     const maxAttempts = this.configService.get<number>('OTP_MAX_ATTEMPTS', 3);
 
     const otpToken = await this.otpRepo
@@ -117,25 +168,6 @@ export class AuthService {
     await this.otpRepo.delete({ id: otpToken.id });
 
     let user = await this.userRepo.findOne({ where: { phone } });
-    const isNewUser = !user;
-
-    if (isNewUser && !full_name) {
-      throw new HttpException(
-        {
-          code: 'FULL_NAME_REQUIRED',
-          message: 'Full name is required for new accounts',
-        },
-        HttpStatus.UNPROCESSABLE_ENTITY,
-      );
-    }
-
-    if (!isNewUser && full_name) {
-      throw new ConflictException({
-        code: 'PHONE_ALREADY_REGISTERED',
-        message: 'This phone number is already linked to an account',
-      });
-    }
-
     if (!user) {
       user = await this.userRepo.save(
         this.userRepo.create({

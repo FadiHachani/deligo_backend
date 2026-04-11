@@ -11,7 +11,7 @@ Built with **NestJS · TypeScript · PostgreSQL · Redis · Socket.IO · h3-js**
 
 | Feature | Description |
 |---|---|
-| OTP Auth | Phone-based login with profile completion (full name, email) |
+| OTP Auth | Separate register/login flows with phone-based OTP verification |
 | JWT RS256 | Short-lived access tokens + long-lived refresh tokens |
 | Driver applications | Clients apply to become drivers; admins approve/reject |
 | Transport requests | Clients post pickup/dropoff jobs with item details |
@@ -159,8 +159,10 @@ All responses follow this envelope:
 
 | Method | Endpoint | Auth | Description |
 |---|---|---|---|
-| POST | `/otp/request` | Public | Request OTP for a phone number |
-| POST | `/otp/verify` | Public | Verify OTP → returns tokens. Accepts optional `full_name` and `email` for profile completion |
+| POST | `/register/otp/request` | Public | Request OTP for registration. Rejects with `409 PHONE_ALREADY_REGISTERED` if phone exists |
+| POST | `/register/otp/verify` | Public | Verify OTP → creates account + returns tokens. Accepts optional `full_name` and `email` |
+| POST | `/login/otp/request` | Public | Request OTP for login. Rejects with `404 PHONE_NOT_FOUND` if phone not registered |
+| POST | `/login/otp/verify` | Public | Verify OTP → returns tokens for existing user |
 | POST | `/refresh` | Public | Exchange refresh token for new access token |
 | POST | `/logout` | Public | Revoke refresh token |
 
@@ -390,7 +392,8 @@ pm2 logs deligo-api
 http://51.77.18.159
 ```
 
-Example:
+Examples:
 ```
-http://51.77.18.159/api/auth/otp/request
+http://51.77.18.159/api/auth/register/otp/request
+http://51.77.18.159/api/auth/login/otp/request
 ```

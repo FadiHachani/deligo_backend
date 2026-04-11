@@ -10,14 +10,24 @@ import { Public } from './decorators/public.decorator';
 export class AuthController {
   constructor(private readonly authService: AuthService) {}
 
-  @Post('otp/request')
-  requestOtp(@Body() dto: RequestOtpDto) {
-    return this.authService.requestOtp(dto.phone);
+  @Post('register/otp/request')
+  requestRegisterOtp(@Body() dto: RequestOtpDto) {
+    return this.authService.requestRegisterOtp(dto.phone);
   }
 
-  @Post('otp/verify')
-  verifyOtp(@Body() dto: VerifyOtpDto) {
-    return this.authService.verifyOtp(dto.phone, dto.code, dto.full_name, dto.email);
+  @Post('register/otp/verify')
+  verifyRegisterOtp(@Body() dto: VerifyOtpDto) {
+    return this.authService.verifyRegisterOtp(dto.phone, dto.code, dto.full_name, dto.email);
+  }
+
+  @Post('login/otp/request')
+  requestLoginOtp(@Body() dto: RequestOtpDto) {
+    return this.authService.requestLoginOtp(dto.phone);
+  }
+
+  @Post('login/otp/verify')
+  verifyLoginOtp(@Body() dto: VerifyOtpDto) {
+    return this.authService.verifyLoginOtp(dto.phone, dto.code);
   }
 
   @Post('refresh')
