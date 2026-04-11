@@ -71,8 +71,10 @@ export class AuthService {
       }),
     );
 
+    const existingUser = await this.userRepo.findOne({ where: { phone } });
+
     console.log(`[OTP] ${phone}: ${code}`);
-    return { message: 'OTP sent', expiresIn: otpTtl };
+    return { message: 'OTP sent', expiresIn: otpTtl, isExistingUser: !!existingUser };
   }
 
   async verifyOtp(phone: string, code: string, full_name?: string, email?: string) {

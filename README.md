@@ -347,6 +347,24 @@ Your public key (`~/.ssh/id_ed25519.pub`) must be in `/home/ubuntu/.ssh/authoriz
 - nginx proxies port 80 → localhost:3000
 - pm2 manages the Node process (survives disconnects)
 
+### Deploying Updates
+
+```bash
+ssh ubuntu@100.93.224.81
+cd ~/deligo_backend
+git pull
+npm install        # pick up new dependencies
+npm run build
+pm2 restart deligo-api
+```
+
+TypeORM `synchronize: true` automatically applies schema changes (new columns, tables) on restart — no manual migration needed.
+
+> **Production warning:** `synchronize` can silently drop data when columns are renamed or removed. Before going live, switch to TypeORM migrations:
+> 1. Set `synchronize: false` in `app.module.ts`
+> 2. Generate migrations: `npx typeorm migration:generate -d src/data-source.ts`
+> 3. Run migrations: `npx typeorm migration:run -d src/data-source.ts`
+
 ### Start / Stop the server
 
 ```bash
