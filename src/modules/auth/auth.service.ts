@@ -75,7 +75,7 @@ export class AuthService {
     return { message: 'OTP sent', expiresIn: otpTtl };
   }
 
-  async verifyOtp(phone: string, code: string) {
+  async verifyOtp(phone: string, code: string, full_name?: string, email?: string) {
     const maxAttempts = this.configService.get<number>('OTP_MAX_ATTEMPTS', 3);
 
     const otpToken = await this.otpRepo
@@ -117,8 +117,19 @@ export class AuthService {
     let user = await this.userRepo.findOne({ where: { phone } });
     if (!user) {
       user = await this.userRepo.save(
-        this.userRepo.create({ phone, role: UserRole.CLIENT }),
+        this.userRepo.create({
+          phone,
+          role: UserRole.CLIENT,
+          full_name: full_name ?? null,
+          email: email ?? null,
+        }),
       );
+    } else {
+      if (full_name !== undefined) user.full_name = full_name;
+      if (email !== undefined) user.email = email;
+      if (full_name !== undefined || email !== undefined) {
+        user = await this.userRepo.save(user);
+      }
     }
 
     const accessToken = this.generateAccessToken(user.id, user.role);
@@ -129,6 +140,7 @@ export class AuthService {
       phone: user.phone,
       role: user.role,
       full_name: user.full_name,
+      email: user.email,
     };
 
     if (user.role === UserRole.DRIVER) {

@@ -11,7 +11,7 @@ Built with **NestJS · TypeScript · PostgreSQL · Redis · Socket.IO · h3-js**
 
 | Feature | Description |
 |---|---|
-| OTP Auth | Phone-based login (no SMS — OTP printed to console in dev) |
+| OTP Auth | Phone-based login with profile completion (full name, email) |
 | JWT RS256 | Short-lived access tokens + long-lived refresh tokens |
 | Driver applications | Clients apply to become drivers; admins approve/reject |
 | Transport requests | Clients post pickup/dropoff jobs with item details |
@@ -34,6 +34,7 @@ Built with **NestJS · TypeScript · PostgreSQL · Redis · Socket.IO · h3-js**
 | Real-time | Socket.IO (namespace `/tracking`) |
 | Spatial | h3-js (Uber H3 hexagonal grid, res 9 & 7) |
 | Auth | JWT RS256 — OTP phone verification |
+| Image processing | sharp (resize + WebP compression for avatars) |
 | Validation | class-validator + class-transformer |
 
 ---
@@ -50,7 +51,8 @@ src/
 │   ├── guards/               # RolesGuard, ApprovedDriverGuard
 │   ├── h3/                   # H3Service — zone queries, k-ring, heatmap
 │   ├── interceptors/         # ResponseEnvelopeInterceptor
-│   └── types/                # JwtUser class
+│   ├── types/                # JwtUser class
+│   └── upload/               # UploadService — avatar compression (sharp → WebP)
 ├── config/
 │   └── env.validation.ts     # Validates all required env vars on startup
 ├── entities/                 # TypeORM entities (one file per table)
@@ -158,7 +160,7 @@ All responses follow this envelope:
 | Method | Endpoint | Auth | Description |
 |---|---|---|---|
 | POST | `/otp/request` | Public | Request OTP for a phone number |
-| POST | `/otp/verify` | Public | Verify OTP → returns `accessToken` + `refreshToken` |
+| POST | `/otp/verify` | Public | Verify OTP → returns tokens. Accepts optional `full_name` and `email` for profile completion |
 | POST | `/refresh` | Public | Exchange refresh token for new access token |
 | POST | `/logout` | Public | Revoke refresh token |
 
@@ -167,7 +169,8 @@ All responses follow this envelope:
 | Method | Endpoint | Auth | Description |
 |---|---|---|---|
 | GET | `/me` | Any | Get own profile (+ driver info if applicable) |
-| PATCH | `/me` | Any | Update `full_name` / `avatar_url` |
+| PATCH | `/me` | Any | Update `full_name` / `email` / `avatar_url` |
+| POST | `/me/avatar` | Any | Upload profile picture (multipart, max 5MB, JPEG/PNG/WebP → compressed to 300x300 WebP) |
 | POST | `/me/apply-as-driver` | CLIENT | Submit driver application |
 | GET | `/me/application-status` | DRIVER | Check application status |
 
@@ -264,6 +267,27 @@ const socket = io('http://localhost:3000/tracking', {
 
 ---
 
+## Profile Picture Upload
+
+Avatars are uploaded via `POST /api/users/me/avatar` as `multipart/form-data` (field name: `avatar`).
+
+- **Max size**: 5MB input
+- **Accepted formats**: JPEG, PNG, WebP
+- **Processing**: resized to 300x300 (cover crop) and converted to WebP at 80% quality via sharp
+- **Storage**: saved to `uploads/avatars/` (served statically at `/uploads/avatars/<uuid>.webp`)
+- **Space savings**: a typical 3MB phone photo compresses to ~15-30KB as 300x300 WebP
+- **Cleanup**: uploading a new avatar automatically deletes the previous one
+
+```bash
+# Example upload with curl
+curl -X POST http://localhost:3000/api/users/me/avatar \
+  -H "Authorization: Bearer <token>" \
+  -F "avatar=@photo.jpg"
+# → { "avatar_url": "/uploads/avatars/uuid.webp" }
+```
+
+---
+
 ## Request & Booking State Machines
 
 ```
@@ -291,3 +315,64 @@ Booking:  CONFIRMED → IN_TRANSIT → DELIVERED
 - JWT private key (`keys/private.pem`) must never be committed — it's in `.gitignore`
 - OTP codes are logged to console only — wire a real SMS provider for production
 - Refresh tokens are SHA-256 hashed before storage
+- Uploaded files (`uploads/`) are gitignored — back them up separately in production
+
+---
+
+## Production Server (OVH via Tailscale)
+
+### Server Details
+
+| | |
+|---|---|
+| Tailscale IP | `100.93.224.81` |
+| Public IP | `51.77.18.159` |
+| Tailscale hostname | `deligobackend.taild2bb8.ts.net` |
+| SSH user | `ubuntu` |
+| Server user | `aymen.frikha88@` (Aymen Frikha) |
+| App location | `~/deligo_backend` |
+
+### SSH Access
+
+```bash
+ssh ubuntu@100.93.224.81
+```
+
+Your public key (`~/.ssh/id_ed25519.pub`) must be in `/home/ubuntu/.ssh/authorized_keys` on the server.
+
+### Server Setup (already done)
+
+- Node.js 20, PostgreSQL 16, Redis 7, nginx, pm2 installed
+- PostgreSQL user: `deligo` / password: `deligo123` / db: `deligo`
+- nginx proxies port 80 → localhost:3000
+- pm2 manages the Node process (survives disconnects)
+
+### Start / Stop the server
+
+```bash
+# SSH in first
+ssh ubuntu@100.93.224.81
+
+# Start
+pm2 start npm --name deligo-api -- run start:prod
+
+# Stop
+pm2 stop deligo-api
+
+# Check status
+pm2 status
+
+# View logs
+pm2 logs deligo-api
+```
+
+### Frontend API Base URL
+
+```
+http://51.77.18.159
+```
+
+Example:
+```
+http://51.77.18.159/api/auth/otp/request
+```

@@ -1,4 +1,17 @@
-import { Body, Controller, Get, Patch, Post, UseGuards } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  Get,
+  Patch,
+  Post,
+  UploadedFile,
+  UseGuards,
+  UseInterceptors,
+  ParseFilePipe,
+  MaxFileSizeValidator,
+  FileTypeValidator,
+} from '@nestjs/common';
+import { FileInterceptor } from '@nestjs/platform-express';
 import { UsersService } from './users.service';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
 import { UpdateUserDto } from './dto/update-user.dto';
@@ -27,6 +40,23 @@ export class UsersController {
   @Roles(UserRole.CLIENT)
   applyAsDriver(@CurrentUser() user: JwtUser, @Body() dto: ApplyAsDriverDto) {
     return this.usersService.applyAsDriver(user.sub, dto);
+  }
+
+  @Post('me/avatar')
+  @UseInterceptors(FileInterceptor('avatar', { storage: undefined }))
+  uploadAvatar(
+    @CurrentUser() user: JwtUser,
+    @UploadedFile(
+      new ParseFilePipe({
+        validators: [
+          new MaxFileSizeValidator({ maxSize: 5 * 1024 * 1024 }),
+          new FileTypeValidator({ fileType: /^image\/(jpeg|png|webp)$/ }),
+        ],
+      }),
+    )
+    file: Express.Multer.File,
+  ) {
+    return this.usersService.uploadAvatar(user.sub, file);
   }
 
   @Get('me/application-status')

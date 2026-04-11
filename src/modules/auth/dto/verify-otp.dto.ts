@@ -1,4 +1,4 @@
-import { IsString, Length, Matches } from 'class-validator';
+import { IsEmail, IsOptional, IsString, Length, Matches, MaxLength } from 'class-validator';
 
 export class VerifyOtpDto {
   @IsString()
@@ -11,4 +11,13 @@ export class VerifyOtpDto {
   @Length(6, 6, { message: 'OTP code must be exactly 6 digits' })
   @Matches(/^\d{6}$/, { message: 'OTP code must be numeric' })
   code: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(100)
+  full_name?: string;
+
+  @IsOptional()
+  @IsEmail({}, { message: 'Invalid email address' })
+  email?: string;
 }

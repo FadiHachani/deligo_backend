@@ -27,6 +27,9 @@ export class User {
   full_name: string | null;
 
   @Column({ type: 'varchar', nullable: true })
+  email: string | null;
+
+  @Column({ type: 'varchar', nullable: true })
   avatar_url: string | null;
 
   @Column({ type: 'boolean', default: true })

@@ -11,6 +11,7 @@ import { DriverProfile } from '../../entities/driver-profile.entity';
 import { UpdateUserDto } from './dto/update-user.dto';
 import { ApplyAsDriverDto } from './dto/apply-driver.dto';
 import { UserRole } from '../../common/enums';
+import { UploadService } from '../../common/upload/upload.service';
 
 @Injectable()
 export class UsersService {
@@ -19,6 +20,7 @@ export class UsersService {
     private readonly userRepo: Repository<User>,
     @InjectRepository(DriverProfile)
     private readonly driverProfileRepo: Repository<DriverProfile>,
+    private readonly uploadService: UploadService,
   ) {}
 
   async getMe(userId: string) {
@@ -33,6 +35,20 @@ export class UsersService {
   async updateMe(userId: string, dto: UpdateUserDto) {
     await this.userRepo.update(userId, dto);
     return this.getMe(userId);
+  }
+
+  async uploadAvatar(userId: string, file: Express.Multer.File) {
+    const user = await this.userRepo.findOne({ where: { id: userId } });
+    if (!user) throw new NotFoundException('User not found');
+
+    if (user.avatar_url) {
+      this.uploadService.deleteFile(user.avatar_url);
+    }
+
+    const avatarUrl = await this.uploadService.compressAndSaveAvatar(file);
+    await this.userRepo.update(userId, { avatar_url: avatarUrl });
+
+    return { avatar_url: avatarUrl };
   }
 
   async applyAsDriver(userId: string, dto: ApplyAsDriverDto) {
