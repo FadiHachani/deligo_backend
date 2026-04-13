@@ -8,6 +8,7 @@ import { Repository } from 'typeorm';
 import { TransportRequest } from '../../entities/transport-request.entity';
 import { DriverProfile } from '../../entities/driver-profile.entity';
 import { H3Service, H3_RESOLUTION_FINE } from '../../common/h3/h3.service';
+import { UploadService } from '../../common/upload/upload.service';
 import { RequestStatus, UserRole } from '../../common/enums';
 import { assertTransition } from '../../common/state-machine';
 import { CreateRequestDto } from './dto/create-request.dto';
@@ -21,9 +22,10 @@ export class RequestsService {
     @InjectRepository(DriverProfile)
     private readonly driverProfileRepo: Repository<DriverProfile>,
     private readonly h3Service: H3Service,
+    private readonly uploadService: UploadService,
   ) {}
 
-  async create(clientId: string, dto: CreateRequestDto) {
+  async create(clientId: string, dto: CreateRequestDto, files: Express.Multer.File[]) {
     const pickup_h3_index = this.h3Service.latLngToH3(
       dto.pickup_lat,
       dto.pickup_lng,
@@ -34,6 +36,8 @@ export class RequestsService {
       dto.dropoff_lng,
       H3_RESOLUTION_FINE,
     );
+
+    const photo_urls = await this.uploadService.compressAndSaveItemPhotos(files);
 
     const req = this.requestRepo.create({
       client_id: clientId,
@@ -46,6 +50,7 @@ export class RequestsService {
       item_category: dto.item_category,
       description: dto.description,
       scheduled_at: dto.scheduled_at ? new Date(dto.scheduled_at) : null,
+      photo_urls,
     });
 
     return this.requestRepo.save(req);

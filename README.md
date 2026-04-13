@@ -14,7 +14,7 @@ Built with **NestJS · TypeScript · PostgreSQL · Redis · Socket.IO · h3-js**
 | OTP Auth | Separate register/login flows with phone-based OTP verification |
 | JWT RS256 | Short-lived access tokens + long-lived refresh tokens |
 | Driver applications | Clients apply to become drivers; admins approve/reject |
-| Transport requests | Clients post pickup/dropoff jobs with item details |
+| Transport requests | Clients post pickup/dropoff jobs with item details and 2–5 photos |
 | Bidding | Approved drivers bid on open requests (price + ETA) |
 | Bookings | Client accepts a bid → booking created transactionally |
 | Real-time tracking | Driver streams GPS over WebSocket; client sees live location |
@@ -202,7 +202,7 @@ All responses follow this envelope:
 
 | Method | Endpoint | Auth | Description |
 |---|---|---|---|
-| POST | `/` | CLIENT | Create transport request |
+| POST | `/` | CLIENT | Create transport request (multipart with 2–5 item photos) |
 | GET | `/` | Any | List requests (filtered by role + `?status=&page=&limit=`) |
 | GET | `/:id` | Owner/driver/admin | Get request details with bids |
 | PATCH | `/:id/cancel` | CLIENT | Cancel open/bidding request |
@@ -286,6 +286,35 @@ curl -X POST http://localhost:3000/api/users/me/avatar \
   -H "Authorization: Bearer <token>" \
   -F "avatar=@photo.jpg"
 # → { "avatar_url": "/uploads/avatars/uuid.webp" }
+```
+
+---
+
+## Item Photo Upload
+
+When creating a transport request, clients must upload **2 to 5 photos** of the item via `POST /api/requests` as `multipart/form-data`.
+
+- **Field name**: `photos` (multiple files)
+- **Required**: minimum 2 photos, maximum 5
+- **Max size**: 5MB per photo
+- **Accepted formats**: JPEG, PNG, WebP
+- **Processing**: resized to max 800px wide (aspect ratio preserved, no upscaling) and converted to WebP at 80% quality via sharp
+- **Storage**: saved to `uploads/items/` (served statically at `/uploads/items/<uuid>.webp`)
+- **Response**: `photo_urls` array in the created request object
+
+```bash
+# Example: create a transport request with item photos
+curl -X POST http://localhost:3000/api/requests \
+  -H "Authorization: Bearer <token>" \
+  -F "pickup_lat=36.8065" \
+  -F "pickup_lng=10.1815" \
+  -F "dropoff_lat=36.8189" \
+  -F "dropoff_lng=10.1658" \
+  -F "item_category=furniture" \
+  -F "description=Large wooden wardrobe, needs careful handling" \
+  -F "photos=@item-front.jpg" \
+  -F "photos=@item-side.jpg"
+# → { "photo_urls": ["/uploads/items/uuid1.webp", "/uploads/items/uuid2.webp"], ... }
 ```
 
 ---

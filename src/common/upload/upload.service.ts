@@ -6,15 +6,17 @@ import { v4 as uuidv4 } from 'uuid';
 
 @Injectable()
 export class UploadService {
-  private readonly uploadDir = path.join(process.cwd(), 'uploads', 'avatars');
+  private readonly avatarDir = path.join(process.cwd(), 'uploads', 'avatars');
+  private readonly itemPhotosDir = path.join(process.cwd(), 'uploads', 'items');
 
   constructor() {
-    fs.mkdirSync(this.uploadDir, { recursive: true });
+    fs.mkdirSync(this.avatarDir, { recursive: true });
+    fs.mkdirSync(this.itemPhotosDir, { recursive: true });
   }
 
   async compressAndSaveAvatar(file: Express.Multer.File): Promise<string> {
     const filename = `${uuidv4()}.webp`;
-    const filepath = path.join(this.uploadDir, filename);
+    const filepath = path.join(this.avatarDir, filename);
 
     await sharp(file.buffer)
       .resize(300, 300, { fit: 'cover' })
@@ -22,6 +24,22 @@ export class UploadService {
       .toFile(filepath);
 
     return `/uploads/avatars/${filename}`;
+  }
+
+  async compressAndSaveItemPhoto(file: Express.Multer.File): Promise<string> {
+    const filename = `${uuidv4()}.webp`;
+    const filepath = path.join(this.itemPhotosDir, filename);
+
+    await sharp(file.buffer)
+      .resize(800, null, { fit: 'inside', withoutEnlargement: true })
+      .webp({ quality: 80 })
+      .toFile(filepath);
+
+    return `/uploads/items/${filename}`;
+  }
+
+  async compressAndSaveItemPhotos(files: Express.Multer.File[]): Promise<string[]> {
+    return Promise.all(files.map((file) => this.compressAndSaveItemPhoto(file)));
   }
 
   deleteFile(relativePath: string): void {

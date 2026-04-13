@@ -41,6 +41,9 @@ export class TransportRequest {
   @Column({ type: 'text' })
   description: string;
 
+  @Column({ type: 'json', default: [] })
+  photo_urls: string[];
+
   @Index()
   @Column({ type: 'enum', enum: RequestStatus, default: RequestStatus.OPEN })
   status: RequestStatus;
