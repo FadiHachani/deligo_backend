@@ -88,7 +88,7 @@ export class UsersService {
     });
     if (!profile) throw new NotFoundException('Driver profile not found');
     return {
-      applicationStatus: profile.application_status,
+      status: profile.application_status,
     };
   }
 }

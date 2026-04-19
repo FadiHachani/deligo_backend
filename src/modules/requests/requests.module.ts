@@ -5,9 +5,14 @@ import { RequestsService } from './requests.service';
 import { TransportRequest } from '../../entities/transport-request.entity';
 import { DriverProfile } from '../../entities/driver-profile.entity';
 import { UploadModule } from '../../common/upload/upload.module';
+import { NotificationsModule } from '../notifications/notifications.module';
 
 @Module({
-  imports: [TypeOrmModule.forFeature([TransportRequest, DriverProfile]), UploadModule],
+  imports: [
+    TypeOrmModule.forFeature([TransportRequest, DriverProfile]),
+    UploadModule,
+    NotificationsModule,
+  ],
   controllers: [RequestsController],
   providers: [RequestsService],
   exports: [RequestsService],

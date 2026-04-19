@@ -75,15 +75,13 @@ export class BidsService {
       `[BID] New bid on request ${dto.request_id} from driver ${driverId}`,
     );
 
-    // Notify client on first bid
-    if (request.status === RequestStatus.OPEN) {
-      await this.notificationsService.create(
-        request.client_id,
-        'BID_RECEIVED',
-        'New bid on your request',
-        `A driver has placed a bid on your transport request.`,
-      );
-    }
+    // Notify client on every new bid
+    await this.notificationsService.create(
+      request.client_id,
+      'bid_received',
+      'New bid on your request',
+      `A driver has placed a bid on your transport request.`,
+    );
 
     return bid;
   }
@@ -173,7 +171,7 @@ export class BidsService {
       // Notify winning driver
       await this.notificationsService.create(
         bid.driver_id,
-        'BID_ACCEPTED',
+        'bid_accepted',
         'Your bid was accepted!',
         `Your bid for the transport request has been accepted.`,
       );
@@ -186,11 +184,19 @@ export class BidsService {
         rejectedBids.map((rb) =>
           this.notificationsService.create(
             rb.driver_id,
-            'BID_REJECTED',
+            'bid_rejected',
             'Your bid was not selected',
             `Another driver was selected for this request.`,
           ),
         ),
+      );
+
+      // Notify client that booking was created
+      await this.notificationsService.create(
+        clientId,
+        'booking_created',
+        'Booking confirmed',
+        `Your transport booking has been created.`,
       );
 
       return booking;
@@ -216,7 +222,7 @@ export class BidsService {
 
     await this.notificationsService.create(
       bid.driver_id,
-      'BID_REJECTED',
+      'bid_rejected',
       'Your bid was declined',
       'The client has declined your bid on this request.',
     );
@@ -225,7 +231,10 @@ export class BidsService {
   }
 
   async withdraw(bidId: string, driverId: string) {
-    const bid = await this.bidRepo.findOne({ where: { id: bidId } });
+    const bid = await this.bidRepo.findOne({
+      where: { id: bidId },
+      relations: ['request'],
+    });
     if (!bid) throw new NotFoundException('Bid not found');
     if (bid.driver_id !== driverId)
       throw new ForbiddenException('Access denied');
@@ -236,6 +245,15 @@ export class BidsService {
       });
     }
     bid.status = BidStatus.WITHDRAWN;
-    return this.bidRepo.save(bid);
+    const saved = await this.bidRepo.save(bid);
+
+    await this.notificationsService.create(
+      bid.request.client_id,
+      'bid_withdrawn',
+      'A bid was withdrawn',
+      'A driver has withdrawn their bid on your request.',
+    );
+
+    return saved;
   }
 }

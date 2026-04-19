@@ -51,7 +51,7 @@ export class AdminService {
     console.log(`[ADMIN] Driver ${driverId} approved`);
     await this.notificationsService.create(
       profile.user_id,
-      'APPLICATION_APPROVED',
+      'application_approved',
       'Your driver application is approved',
       `Congratulations! Your driver application has been approved.`,
     );
@@ -70,7 +70,7 @@ export class AdminService {
     console.log(`[ADMIN] Driver ${driverId} rejected: ${reason}`);
     await this.notificationsService.create(
       profile.user_id,
-      'APPLICATION_REJECTED',
+      'application_rejected',
       'Your driver application was rejected',
       `Your driver application was rejected. Reason: ${reason}`,
     );

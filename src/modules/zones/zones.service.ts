@@ -30,6 +30,7 @@ export class ZonesService {
     const driverIds = presences.map((p) => p.driver_id);
     const profiles = await this.driverProfileRepo
       .createQueryBuilder('dp')
+      .leftJoinAndSelect('dp.user', 'user')
       .where('dp.user_id IN (:...driverIds)', { driverIds })
       .andWhere('dp.is_online = true')
       .andWhere('dp.application_status = :status', {
@@ -38,10 +39,11 @@ export class ZonesService {
       .getMany();
 
     return profiles.map((dp) => ({
-      driver_id: dp.user_id,
-      current_lat: dp.current_lat,
-      current_lng: dp.current_lng,
+      user_id: dp.user_id,
+      lat: dp.current_lat,
+      lng: dp.current_lng,
       h3_index: dp.current_h3_index,
+      full_name: dp.user?.full_name ?? null,
       vehicle_type: dp.vehicle_type,
       avg_rating: dp.avg_rating,
     }));
@@ -77,15 +79,10 @@ export class ZonesService {
       }
     }
 
-    return ring.map((h3Index) => {
-      const { lat: cLat, lng: cLng } = this.h3Service.h3ToLatLng(h3Index);
-      return {
-        h3_index: h3Index,
-        driver_count: countMap.get(h3Index) ?? 0,
-        center_lat: cLat,
-        center_lng: cLng,
-      };
-    });
+    return ring.map((h3Index) => ({
+      h3_index: h3Index,
+      count: countMap.get(h3Index) ?? 0,
+    }));
   }
 
   async getCoverage() {
@@ -113,14 +110,6 @@ export class ZonesService {
       }
     }
 
-    return Array.from(countMap.entries()).map(([h3Index, driver_count]) => {
-      const { lat: cLat, lng: cLng } = this.h3Service.h3ToLatLng(h3Index);
-      return {
-        h3_index: h3Index,
-        driver_count,
-        center_lat: cLat,
-        center_lng: cLng,
-      };
-    });
+    return Array.from(countMap.keys());
   }
 }

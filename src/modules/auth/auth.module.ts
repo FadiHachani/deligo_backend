@@ -11,11 +11,10 @@ import { JwtStrategy } from './strategies/jwt.strategy';
 import { OtpToken } from '../../entities/otp-token.entity';
 import { User } from '../../entities/user.entity';
 import { RefreshToken } from '../../entities/refresh-token.entity';
-import { DriverProfile } from '../../entities/driver-profile.entity';
 
 @Module({
   imports: [
-    TypeOrmModule.forFeature([OtpToken, User, RefreshToken, DriverProfile]),
+    TypeOrmModule.forFeature([OtpToken, User, RefreshToken]),
     PassportModule,
     JwtModule.registerAsync({
       useFactory: (configService: ConfigService) => {

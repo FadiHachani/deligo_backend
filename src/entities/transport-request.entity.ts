@@ -23,6 +23,9 @@ export class TransportRequest {
   @Column({ type: 'double precision' })
   pickup_lng: number;
 
+  @Column({ type: 'varchar', nullable: true })
+  pickup_address: string | null;
+
   @Column({ type: 'varchar' })
   pickup_h3_index: string;
 
@@ -31,6 +34,9 @@ export class TransportRequest {
 
   @Column({ type: 'double precision' })
   dropoff_lng: number;
+
+  @Column({ type: 'varchar', nullable: true })
+  dropoff_address: string | null;
 
   @Column({ type: 'varchar' })
   dropoff_h3_index: string;

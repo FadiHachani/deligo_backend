@@ -13,6 +13,7 @@ import { RequestStatus, UserRole } from '../../common/enums';
 import { assertTransition } from '../../common/state-machine';
 import { CreateRequestDto } from './dto/create-request.dto';
 import { ListRequestsDto } from './dto/list-requests.dto';
+import { NotificationsService } from '../notifications/notifications.service';
 
 @Injectable()
 export class RequestsService {
@@ -23,6 +24,7 @@ export class RequestsService {
     private readonly driverProfileRepo: Repository<DriverProfile>,
     private readonly h3Service: H3Service,
     private readonly uploadService: UploadService,
+    private readonly notificationsService: NotificationsService,
   ) {}
 
   async create(clientId: string, dto: CreateRequestDto, files: Express.Multer.File[]) {
@@ -43,9 +45,11 @@ export class RequestsService {
       client_id: clientId,
       pickup_lat: dto.pickup_lat,
       pickup_lng: dto.pickup_lng,
+      pickup_address: dto.pickup_address ?? null,
       pickup_h3_index,
       dropoff_lat: dto.dropoff_lat,
       dropoff_lng: dto.dropoff_lng,
+      dropoff_address: dto.dropoff_address ?? null,
       dropoff_h3_index,
       item_category: dto.item_category,
       description: dto.description,
@@ -122,7 +126,7 @@ export class RequestsService {
   async findOne(requestId: string, userId: string, role: UserRole) {
     const req = await this.requestRepo.findOne({
       where: { id: requestId },
-      relations: ['bids', 'client'],
+      relations: ['bids', 'bids.driver', 'bids.driver.driver_profile', 'client'],
     });
     if (!req) throw new NotFoundException('Request not found');
 
@@ -137,14 +141,30 @@ export class RequestsService {
   }
 
   async cancel(requestId: string, clientId: string) {
-    const req = await this.requestRepo.findOne({ where: { id: requestId } });
+    const req = await this.requestRepo.findOne({
+      where: { id: requestId },
+      relations: ['bids'],
+    });
     if (!req) throw new NotFoundException('Request not found');
     if (req.client_id !== clientId)
       throw new ForbiddenException('Access denied');
 
     assertTransition(req.status, RequestStatus.CANCELLED);
     req.status = RequestStatus.CANCELLED;
-    return this.requestRepo.save(req);
+    const saved = await this.requestRepo.save(req);
+
+    await Promise.all(
+      (req.bids ?? []).map((b) =>
+        this.notificationsService.create(
+          b.driver_id,
+          'request_cancelled',
+          'Request cancelled',
+          'The client has cancelled a request you bid on.',
+        ),
+      ),
+    );
+
+    return saved;
   }
 
   async updateStatus(requestId: string, newStatus: RequestStatus) {

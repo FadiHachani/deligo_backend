@@ -16,7 +16,6 @@ import { createHash } from 'crypto';
 import { OtpToken } from '../../entities/otp-token.entity';
 import { User } from '../../entities/user.entity';
 import { RefreshToken } from '../../entities/refresh-token.entity';
-import { DriverProfile } from '../../entities/driver-profile.entity';
 import { UserRole } from '../../common/enums';
 
 @Injectable()
@@ -28,8 +27,6 @@ export class AuthService {
     private readonly userRepo: Repository<User>,
     @InjectRepository(RefreshToken)
     private readonly refreshTokenRepo: Repository<RefreshToken>,
-    @InjectRepository(DriverProfile)
-    private readonly driverProfileRepo: Repository<DriverProfile>,
     private readonly jwtService: JwtService,
     private readonly configService: ConfigService,
   ) {}
@@ -182,22 +179,12 @@ export class AuthService {
     const accessToken = this.generateAccessToken(user.id, user.role);
     const refreshToken = await this.generateRefreshToken(user.id);
 
-    const userObj: Record<string, unknown> = {
-      id: user.id,
-      phone: user.phone,
-      role: user.role,
-      full_name: user.full_name,
-      email: user.email,
-    };
+    const fullUser = await this.userRepo.findOne({
+      where: { id: user.id },
+      relations: ['driver_profile'],
+    });
 
-    if (user.role === UserRole.DRIVER) {
-      const profile = await this.driverProfileRepo.findOne({
-        where: { user_id: user.id },
-      });
-      if (profile) userObj['applicationStatus'] = profile.application_status;
-    }
-
-    return { accessToken, refreshToken, user: userObj };
+    return { accessToken, refreshToken, user: fullUser };
   }
 
   async refresh(rawToken: string): Promise<{ accessToken: string }> {

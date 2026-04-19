@@ -34,6 +34,7 @@ export class BookingsService {
       .leftJoinAndSelect('booking.request', 'request')
       .leftJoinAndSelect('booking.bid', 'bid')
       .leftJoinAndSelect('booking.driver', 'driver')
+      .leftJoinAndSelect('driver.driver_profile', 'driver_profile')
       .leftJoinAndSelect('booking.client', 'client')
       .orderBy('booking.id', 'DESC');
 
@@ -59,7 +60,7 @@ export class BookingsService {
   async findOne(bookingId: string, userId: string, role: UserRole) {
     const booking = await this.bookingRepo.findOne({
       where: { id: bookingId },
-      relations: ['request', 'bid', 'driver', 'client'],
+      relations: ['request', 'bid', 'driver', 'driver.driver_profile', 'client'],
     });
     if (!booking) throw new NotFoundException('Booking not found');
 
@@ -89,7 +90,7 @@ export class BookingsService {
 
     await this.notificationsService.create(
       booking.client_id,
-      'BOOKING_STARTED',
+      'booking_started',
       'Your delivery is on the way',
       `Your delivery has started. Driver is en route.`,
     );
@@ -124,13 +125,13 @@ export class BookingsService {
     await Promise.all([
       this.notificationsService.create(
         booking.client_id,
-        'BOOKING_DELIVERED',
+        'booking_delivered',
         'Delivery completed',
         `Your delivery has been completed successfully.`,
       ),
       this.notificationsService.create(
         driverId,
-        'BOOKING_DELIVERED',
+        'booking_delivered',
         'Delivery completed',
         `You have completed the delivery.`,
       ),
@@ -158,7 +159,7 @@ export class BookingsService {
 
     await this.notificationsService.create(
       booking.client_id,
-      'BOOKING_FAILED',
+      'booking_failed',
       'Delivery failed',
       `Unfortunately, your delivery could not be completed.`,
     );
