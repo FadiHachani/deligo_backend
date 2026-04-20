@@ -74,6 +74,7 @@ export class TrackingGateway
       });
 
       (client as Socket & { user: JwtUser }).user = payload;
+      await client.join(`user:${payload.sub}`);
       console.log(`[WS] Client connected: ${client.id} (${payload.sub})`);
     } catch {
       client.disconnect();
@@ -196,5 +197,9 @@ export class TrackingGateway
       status,
       timestamp: new Date().toISOString(),
     });
+  }
+
+  emitNotificationCreated(userId: string, notification: unknown): void {
+    this.server.to(`user:${userId}`).emit('notification_created', notification);
   }
 }

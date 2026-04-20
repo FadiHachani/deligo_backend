@@ -2,17 +2,20 @@ import {
   ForbiddenException,
   Injectable,
   NotFoundException,
+  Optional,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { Notification } from '../../entities/notification.entity';
 import { ListNotificationsDto } from './dto/list-notifications.dto';
+import type { TrackingGateway } from '../tracking/tracking.gateway';
 
 @Injectable()
 export class NotificationsService {
   constructor(
     @InjectRepository(Notification)
     private readonly notificationRepo: Repository<Notification>,
+    @Optional() private readonly trackingGateway: TrackingGateway | null = null,
   ) {}
 
   async create(
@@ -28,7 +31,9 @@ export class NotificationsService {
       title,
       body,
     });
-    return this.notificationRepo.save(notification);
+    const saved = await this.notificationRepo.save(notification);
+    this.trackingGateway?.emitNotificationCreated(userId, saved);
+    return saved;
   }
 
   async list(userId: string, dto: ListNotificationsDto) {
