@@ -2,7 +2,6 @@ import {
   ForbiddenException,
   Injectable,
   NotFoundException,
-  Optional,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
@@ -15,7 +14,7 @@ export class NotificationsService {
   constructor(
     @InjectRepository(Notification)
     private readonly notificationRepo: Repository<Notification>,
-    @Optional() private readonly trackingGateway: TrackingGateway | null = null,
+    private readonly trackingGateway: TrackingGateway,
   ) {}
 
   async create(
@@ -32,8 +31,7 @@ export class NotificationsService {
       body,
     });
     const saved = await this.notificationRepo.save(notification);
-    console.log(`[NOTIFICATION] gateway available: ${!!this.trackingGateway}, emitting to user:${userId}`);
-    this.trackingGateway?.emitNotificationCreated(userId, saved);
+    this.trackingGateway.emitNotificationCreated(userId, saved);
     return saved;
   }
 
