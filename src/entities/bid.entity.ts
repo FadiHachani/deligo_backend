@@ -29,6 +29,19 @@ export class Bid {
   @Column({ type: 'enum', enum: BidStatus, default: BidStatus.PENDING })
   status: BidStatus;
 
+  // Negotiation state. `counter_price_tnd` holds whichever side's latest offer
+  // is currently on the table (set when status is COUNTERED_BY_*). Once the
+  // bid reaches ACCEPTED, `agreed_price_tnd` is the source of truth for the
+  // booking price — consumers should not try to derive it from price_tnd.
+  @Column({ type: 'decimal', precision: 10, scale: 3, nullable: true })
+  counter_price_tnd: number | null;
+
+  @Column({ type: 'decimal', precision: 10, scale: 3, nullable: true })
+  driver_final_price_tnd: number | null;
+
+  @Column({ type: 'decimal', precision: 10, scale: 3, nullable: true })
+  agreed_price_tnd: number | null;
+
   @CreateDateColumn({ type: 'timestamptz' })
   created_at: Date;
 

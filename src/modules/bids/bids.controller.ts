@@ -16,6 +16,8 @@ import { RolesGuard } from '../../common/guards/roles.guard';
 import { UserRole } from '../../common/enums';
 import { CreateBidDto } from './dto/create-bid.dto';
 import { ListBidsDto } from './dto/list-bids.dto';
+import { CounterBidDto } from './dto/counter-bid.dto';
+import { RejectCounterDto } from './dto/reject-counter.dto';
 
 @Controller('api/bids')
 export class BidsController {
@@ -51,5 +53,43 @@ export class BidsController {
   @Roles(UserRole.DRIVER)
   withdraw(@Param('id') id: string, @CurrentUser() user: JwtUser) {
     return this.bidsService.withdraw(id, user.sub);
+  }
+
+  // Client counters a driver's bid with their own price.
+  @Post(':id/counter')
+  @UseGuards(RolesGuard)
+  @Roles(UserRole.CLIENT)
+  counter(
+    @Param('id') id: string,
+    @CurrentUser() user: JwtUser,
+    @Body() dto: CounterBidDto,
+  ) {
+    return this.bidsService.clientCounter(id, user.sub, dto);
+  }
+
+  // Driver accepts the client's counter — triggers the full accept flow.
+  @Post(':id/accept-counter')
+  @UseGuards(ApprovedDriverGuard)
+  acceptCounter(@Param('id') id: string, @CurrentUser() user: JwtUser) {
+    return this.bidsService.driverAcceptCounter(id, user.sub);
+  }
+
+  // Driver rejects the client's counter and proposes a final price.
+  @Post(':id/reject-counter')
+  @UseGuards(ApprovedDriverGuard)
+  rejectCounter(
+    @Param('id') id: string,
+    @CurrentUser() user: JwtUser,
+    @Body() dto: RejectCounterDto,
+  ) {
+    return this.bidsService.driverRejectCounter(id, user.sub, dto);
+  }
+
+  // Client accepts the driver's final price (after COUNTERED_BY_DRIVER).
+  @Post(':id/accept-driver-final')
+  @UseGuards(RolesGuard)
+  @Roles(UserRole.CLIENT)
+  acceptDriverFinal(@Param('id') id: string, @CurrentUser() user: JwtUser) {
+    return this.bidsService.clientAcceptDriverFinal(id, user.sub);
   }
 }

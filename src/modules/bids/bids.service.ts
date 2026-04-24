@@ -12,6 +12,8 @@ import { Booking } from '../../entities/booking.entity';
 import { BidStatus, RequestStatus, UserRole } from '../../common/enums';
 import { assertTransition } from '../../common/state-machine';
 import { CreateBidDto } from './dto/create-bid.dto';
+import { CounterBidDto } from './dto/counter-bid.dto';
+import { RejectCounterDto } from './dto/reject-counter.dto';
 import { NotificationsService } from '../notifications/notifications.service';
 
 @Injectable()
@@ -106,6 +108,19 @@ export class BidsService {
   }
 
   async accept(bidId: string, clientId: string) {
+    return this.acceptWithPrice(bidId, clientId, 'client', null);
+  }
+
+  // Shared acceptance flow. `agreedPrice` overrides the default (bid.price_tnd).
+  // `actor` tells us whether this is the client accepting or the driver
+  // accepting a client counter — affects which statuses are valid entry points
+  // and which notifications go out.
+  private async acceptWithPrice(
+    bidId: string,
+    actorId: string,
+    actor: 'client' | 'driver',
+    agreedPriceOverride: number | null,
+  ) {
     return this.dataSource.transaction(async (manager) => {
       const bid = await manager.findOne(Bid, {
         where: { id: bidId },
@@ -114,36 +129,59 @@ export class BidsService {
       if (!bid) throw new NotFoundException('Bid not found');
 
       const request = bid.request;
-      if (request.client_id !== clientId) {
-        throw new ForbiddenException('Access denied');
+
+      if (actor === 'client') {
+        if (request.client_id !== actorId) {
+          throw new ForbiddenException('Access denied');
+        }
+      } else {
+        if (bid.driver_id !== actorId) {
+          throw new ForbiddenException('Access denied');
+        }
       }
+
       if (request.status !== RequestStatus.BIDDING) {
         throw new BadRequestException({
           code: 'REQUEST_NOT_BIDDING',
           message: 'Request is not in BIDDING status',
         });
       }
-      if (bid.status !== BidStatus.PENDING) {
+
+      const acceptableStatuses: BidStatus[] =
+        actor === 'client'
+          ? [BidStatus.PENDING, BidStatus.COUNTERED_BY_DRIVER]
+          : [BidStatus.COUNTERED_BY_CLIENT];
+      if (!acceptableStatuses.includes(bid.status)) {
         throw new BadRequestException({
-          code: 'BID_NOT_PENDING',
-          message: 'Bid is not in PENDING status',
+          code: 'BID_NOT_ACCEPTABLE',
+          message: `Bid in status ${bid.status} cannot be accepted by ${actor}`,
         });
       }
 
-      // Accept this bid
-      await manager.update(Bid, { id: bidId }, { status: BidStatus.ACCEPTED });
+      const agreedPrice = agreedPriceOverride ?? Number(bid.price_tnd);
 
-      // Reject all other bids
+      // Accept this bid
+      await manager.update(
+        Bid,
+        { id: bidId },
+        { status: BidStatus.ACCEPTED, agreed_price_tnd: agreedPrice },
+      );
+
+      // Reject all other bids (including those mid-counter)
       await manager
         .createQueryBuilder()
         .update(Bid)
         .set({ status: BidStatus.REJECTED })
         .where(
-          'request_id = :requestId AND id != :bidId AND status = :status',
+          'request_id = :requestId AND id != :bidId AND status IN (:...statuses)',
           {
             requestId: request.id,
             bidId,
-            status: BidStatus.PENDING,
+            statuses: [
+              BidStatus.PENDING,
+              BidStatus.COUNTERED_BY_CLIENT,
+              BidStatus.COUNTERED_BY_DRIVER,
+            ],
           },
         )
         .execute();
@@ -154,7 +192,7 @@ export class BidsService {
           request_id: request.id,
           bid_id: bidId,
           driver_id: bid.driver_id,
-          client_id: clientId,
+          client_id: request.client_id,
         }),
       );
 
@@ -165,7 +203,7 @@ export class BidsService {
       });
 
       console.log(
-        `[BID_ACCEPTED] Bid ${bidId} accepted, booking ${booking.id} created`,
+        `[BID_ACCEPTED] Bid ${bidId} accepted at ${agreedPrice} TND, booking ${booking.id} created`,
       );
 
       // Notify winning driver
@@ -173,7 +211,7 @@ export class BidsService {
         bid.driver_id,
         'bid_accepted',
         'Your bid was accepted!',
-        `Your bid for the transport request has been accepted.`,
+        `request_id:${request.id} · ${agreedPrice} TND`,
       );
 
       // Notify rejected drivers
@@ -193,10 +231,10 @@ export class BidsService {
 
       // Notify client that booking was created
       await this.notificationsService.create(
-        clientId,
+        request.client_id,
         'booking_created',
         'Booking confirmed',
-        `Your transport booking has been created.`,
+        `request_id:${request.id} · ${agreedPrice} TND`,
       );
 
       return booking;
@@ -255,5 +293,128 @@ export class BidsService {
     );
 
     return saved;
+  }
+
+  // Client proposes a counter-offer on a driver's bid.
+  // Entry states: PENDING (first counter) or COUNTERED_BY_DRIVER (client
+  // re-counters after driver's "best I can do").
+  async clientCounter(bidId: string, clientId: string, dto: CounterBidDto) {
+    const bid = await this.bidRepo.findOne({
+      where: { id: bidId },
+      relations: ['request'],
+    });
+    if (!bid) throw new NotFoundException('Bid not found');
+    if (bid.request.client_id !== clientId)
+      throw new ForbiddenException('Access denied');
+
+    const validFrom: BidStatus[] = [
+      BidStatus.PENDING,
+      BidStatus.COUNTERED_BY_DRIVER,
+    ];
+    if (!validFrom.includes(bid.status)) {
+      throw new BadRequestException({
+        code: 'BID_NOT_COUNTERABLE',
+        message: `Bid in status ${bid.status} cannot be countered`,
+      });
+    }
+
+    bid.status = BidStatus.COUNTERED_BY_CLIENT;
+    bid.counter_price_tnd = dto.counter_price_tnd;
+    bid.driver_final_price_tnd = null;
+    const saved = await this.bidRepo.save(bid);
+
+    await this.notificationsService.create(
+      bid.driver_id,
+      'bid_counter_received',
+      'Client countered your bid',
+      `request_id:${bid.request_id} · ${dto.counter_price_tnd} TND`,
+    );
+
+    return saved;
+  }
+
+  // Driver accepts the client's counter-offer — triggers the full accept flow,
+  // booking creation, and competing-bid rejection. Agreed price is the counter.
+  async driverAcceptCounter(bidId: string, driverId: string) {
+    const bid = await this.bidRepo.findOne({ where: { id: bidId } });
+    if (!bid) throw new NotFoundException('Bid not found');
+    if (bid.status !== BidStatus.COUNTERED_BY_CLIENT) {
+      throw new BadRequestException({
+        code: 'NO_PENDING_COUNTER',
+        message: 'No client counter to accept',
+      });
+    }
+    if (bid.counter_price_tnd == null) {
+      throw new BadRequestException({
+        code: 'COUNTER_MISSING',
+        message: 'Counter price is missing',
+      });
+    }
+    return this.acceptWithPrice(
+      bidId,
+      driverId,
+      'driver',
+      Number(bid.counter_price_tnd),
+    );
+  }
+
+  // Driver rejects the client's counter and proposes a final price
+  // ("my best is X"). Bid moves to COUNTERED_BY_DRIVER — client can now
+  // accept that final, counter again, or pass.
+  async driverRejectCounter(
+    bidId: string,
+    driverId: string,
+    dto: RejectCounterDto,
+  ) {
+    const bid = await this.bidRepo.findOne({
+      where: { id: bidId },
+      relations: ['request'],
+    });
+    if (!bid) throw new NotFoundException('Bid not found');
+    if (bid.driver_id !== driverId)
+      throw new ForbiddenException('Access denied');
+    if (bid.status !== BidStatus.COUNTERED_BY_CLIENT) {
+      throw new BadRequestException({
+        code: 'NO_PENDING_COUNTER',
+        message: 'No client counter to reject',
+      });
+    }
+
+    bid.status = BidStatus.COUNTERED_BY_DRIVER;
+    bid.driver_final_price_tnd = dto.driver_final_price_tnd;
+    const saved = await this.bidRepo.save(bid);
+
+    await this.notificationsService.create(
+      bid.request.client_id,
+      'bid_counter_rejected',
+      'Driver countered back',
+      `request_id:${bid.request_id} · ${dto.driver_final_price_tnd} TND`,
+    );
+
+    return saved;
+  }
+
+  // Client accepts the driver's final price from a COUNTERED_BY_DRIVER state.
+  async clientAcceptDriverFinal(bidId: string, clientId: string) {
+    const bid = await this.bidRepo.findOne({ where: { id: bidId } });
+    if (!bid) throw new NotFoundException('Bid not found');
+    if (bid.status !== BidStatus.COUNTERED_BY_DRIVER) {
+      throw new BadRequestException({
+        code: 'NO_DRIVER_FINAL',
+        message: 'No driver final price to accept',
+      });
+    }
+    if (bid.driver_final_price_tnd == null) {
+      throw new BadRequestException({
+        code: 'DRIVER_FINAL_MISSING',
+        message: 'Driver final price is missing',
+      });
+    }
+    return this.acceptWithPrice(
+      bidId,
+      clientId,
+      'client',
+      Number(bid.driver_final_price_tnd),
+    );
   }
 }
