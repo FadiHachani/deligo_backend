@@ -80,7 +80,7 @@ export class BidsService {
       request.client_id,
       'bid_received',
       'New bid on your request',
-      `A driver has placed a bid on your transport request.`,
+      `request_id:${dto.request_id}`,
     );
 
     return bid;
