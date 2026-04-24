@@ -32,6 +32,7 @@ export class NotificationsService {
       body,
     });
     const saved = await this.notificationRepo.save(notification);
+    console.log(`[NOTIFICATION] gateway available: ${!!this.trackingGateway}, emitting to user:${userId}`);
     this.trackingGateway?.emitNotificationCreated(userId, saved);
     return saved;
   }
