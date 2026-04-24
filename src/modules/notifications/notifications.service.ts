@@ -8,7 +8,7 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { Notification } from '../../entities/notification.entity';
 import { ListNotificationsDto } from './dto/list-notifications.dto';
-import type { TrackingGateway } from '../tracking/tracking.gateway';
+import { TrackingGateway } from '../tracking/tracking.gateway';
 
 @Injectable()
 export class NotificationsService {
