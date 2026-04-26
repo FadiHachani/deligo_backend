@@ -52,6 +52,7 @@ export class RequestsService {
       dropoff_address: dto.dropoff_address ?? null,
       dropoff_h3_index,
       item_category: dto.item_category,
+      item_name: dto.item_name,
       description: dto.description,
       scheduled_at: dto.scheduled_at ? new Date(dto.scheduled_at) : null,
       photo_urls,

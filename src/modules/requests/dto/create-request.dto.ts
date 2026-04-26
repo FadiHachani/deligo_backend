@@ -54,6 +54,11 @@ export class CreateRequestDto {
   item_category: string;
 
   @IsString()
+  @MinLength(1)
+  @MaxLength(100)
+  item_name: string;
+
+  @IsString()
   @MinLength(5)
   @MaxLength(500)
   description: string;

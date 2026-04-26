@@ -44,6 +44,9 @@ export class TransportRequest {
   @Column({ type: 'varchar' })
   item_category: string;
 
+  @Column({ type: 'varchar', length: 100 })
+  item_name: string;
+
   @Column({ type: 'text' })
   description: string;
 
