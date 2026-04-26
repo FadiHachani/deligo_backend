@@ -1,4 +1,5 @@
 import {
+  BadRequestException,
   ForbiddenException,
   Injectable,
   NotFoundException,
@@ -7,6 +8,7 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { TransportRequest } from '../../entities/transport-request.entity';
 import { DriverProfile } from '../../entities/driver-profile.entity';
+import { Bid } from '../../entities/bid.entity';
 import { H3Service, H3_RESOLUTION_FINE } from '../../common/h3/h3.service';
 import { UploadService } from '../../common/upload/upload.service';
 import { RequestStatus, UserRole } from '../../common/enums';
@@ -22,6 +24,8 @@ export class RequestsService {
     private readonly requestRepo: Repository<TransportRequest>,
     @InjectRepository(DriverProfile)
     private readonly driverProfileRepo: Repository<DriverProfile>,
+    @InjectRepository(Bid)
+    private readonly bidRepo: Repository<Bid>,
     private readonly h3Service: H3Service,
     private readonly uploadService: UploadService,
     private readonly notificationsService: NotificationsService,
@@ -166,6 +170,39 @@ export class RequestsService {
     );
 
     return saved;
+  }
+
+  // Hard-delete: only allowed on already-CANCELLED requests owned by the
+  // caller. Bids attached to the request are removed first to satisfy the FK.
+  // Photo files are unlinked from disk after the row is gone.
+  async delete(requestId: string, clientId: string) {
+    const req = await this.requestRepo.findOne({
+      where: { id: requestId },
+      relations: ['bids'],
+    });
+    if (!req) throw new NotFoundException('Request not found');
+    if (req.client_id !== clientId)
+      throw new ForbiddenException('Access denied');
+    if (req.status !== RequestStatus.CANCELLED) {
+      throw new BadRequestException(
+        'Only cancelled requests can be deleted',
+      );
+    }
+
+    if (req.bids?.length) {
+      await this.bidRepo.delete(req.bids.map((b) => b.id));
+    }
+    await this.requestRepo.delete(req.id);
+
+    for (const url of req.photo_urls ?? []) {
+      try {
+        this.uploadService.deleteFile(url.replace(/^\//, ''));
+      } catch {
+        // best-effort — DB row is gone, an orphaned file isn't worth a 500
+      }
+    }
+
+    return { id: requestId };
   }
 
   async updateStatus(requestId: string, newStatus: RequestStatus) {

@@ -2,6 +2,7 @@ import {
   BadRequestException,
   Body,
   Controller,
+  Delete,
   Get,
   Param,
   Patch,
@@ -68,5 +69,12 @@ export class RequestsController {
   @Roles(UserRole.CLIENT)
   cancel(@Param('id') id: string, @CurrentUser() user: JwtUser) {
     return this.requestsService.cancel(id, user.sub);
+  }
+
+  @Delete(':id')
+  @UseGuards(RolesGuard)
+  @Roles(UserRole.CLIENT)
+  remove(@Param('id') id: string, @CurrentUser() user: JwtUser) {
+    return this.requestsService.delete(id, user.sub);
   }
 }
