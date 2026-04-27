@@ -2,6 +2,7 @@ import {
   ConflictException,
   HttpException,
   HttpStatus,
+  Inject,
   Injectable,
   UnauthorizedException,
 } from '@nestjs/common';
@@ -12,20 +13,15 @@ import { ConfigService } from '@nestjs/config';
 import * as bcrypt from 'bcrypt';
 import { v4 as uuidv4 } from 'uuid';
 import { createHash } from 'crypto';
+import Redis from 'ioredis';
 import { OtpToken } from '../../entities/otp-token.entity';
 import { User } from '../../entities/user.entity';
 import { RefreshToken } from '../../entities/refresh-token.entity';
 import { UserRole } from '../../common/enums';
+import { REDIS_CLIENT } from '../../redis/redis.module';
 
 @Injectable()
 export class AuthService {
-  // In-process per-phone hourly request log. Keys: phone → array of recent
-  // request timestamps (ms). Pruned on every check. Trade-offs:
-  //  - resets on server restart (fine for current single-node dev/prod);
-  //  - doesn't share across instances (revisit when we scale out);
-  //  - we count on EVERY call (registered or not) so the no-enumeration
-  //    response shape stays identical regardless of phone-existence.
-  private readonly recentRequests = new Map<string, number[]>();
   // 20/hour gives breathing room in dev/QA while still bounding spam. Tighten
   // to 5 once SMS billing is live.
   private static readonly HOURLY_CAP = 20;
@@ -40,13 +36,30 @@ export class AuthService {
     private readonly refreshTokenRepo: Repository<RefreshToken>,
     private readonly jwtService: JwtService,
     private readonly configService: ConfigService,
+    @Inject(REDIS_CLIENT) private readonly redis: Redis,
   ) {}
 
-  private checkHourlyCap(phone: string): void {
+  // Sliding-window per-phone rate limit, backed by a Redis sorted set.
+  // Score = unix-ms timestamp; member = same value (deduped per ms with a
+  // suffix). On each call we prune entries older than 1h, count the rest,
+  // reject if at the cap, then record the new timestamp. ZSET lets the
+  // window slide smoothly (vs. fixed buckets) and the data survives restarts
+  // and multi-instance deployments.
+  //
+  // We count on EVERY call (registered or not) so the no-enumeration response
+  // shape stays identical regardless of phone-existence.
+  private async checkHourlyCap(phone: string): Promise<void> {
+    const key = `otp:rl:${phone}`;
     const now = Date.now();
     const cutoff = now - AuthService.HOUR_MS;
-    const arr = (this.recentRequests.get(phone) ?? []).filter((t) => t > cutoff);
-    if (arr.length >= AuthService.HOURLY_CAP) {
+
+    const pipeline = this.redis.multi();
+    pipeline.zremrangebyscore(key, 0, cutoff);
+    pipeline.zcard(key);
+    const results = await pipeline.exec();
+    const count = (results?.[1]?.[1] as number) ?? 0;
+
+    if (count >= AuthService.HOURLY_CAP) {
       throw new HttpException(
         {
           code: 'RATE_LIMITED',
@@ -55,8 +68,14 @@ export class AuthService {
         HttpStatus.TOO_MANY_REQUESTS,
       );
     }
-    arr.push(now);
-    this.recentRequests.set(phone, arr);
+
+    // Append a random suffix so the member is unique even if two requests
+    // land in the same millisecond (ZSET dedupes by member, not score).
+    await this.redis
+      .multi()
+      .zadd(key, now, `${now}:${Math.random().toString(36).slice(2, 8)}`)
+      .pexpire(key, AuthService.HOUR_MS)
+      .exec();
   }
 
   async requestRegisterOtp(
@@ -64,7 +83,7 @@ export class AuthService {
   ): Promise<{ message: string; expiresIn: number }> {
     // Count BEFORE the existence check so the response is identical for
     // registered and unregistered phones (no account-enumeration leak).
-    this.checkHourlyCap(phone);
+    await this.checkHourlyCap(phone);
 
     const otpTtl = this.configService.get<number>('OTP_TTL_SECONDS', 300);
     const existingUser = await this.userRepo.findOne({ where: { phone } });
@@ -81,7 +100,7 @@ export class AuthService {
   async requestLoginOtp(
     phone: string,
   ): Promise<{ message: string; expiresIn: number }> {
-    this.checkHourlyCap(phone);
+    await this.checkHourlyCap(phone);
 
     const otpTtl = this.configService.get<number>('OTP_TTL_SECONDS', 300);
     const existingUser = await this.userRepo.findOne({ where: { phone } });
