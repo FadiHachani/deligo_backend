@@ -3,7 +3,6 @@ import {
   HttpException,
   HttpStatus,
   Injectable,
-  NotFoundException,
   UnauthorizedException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
@@ -20,6 +19,16 @@ import { UserRole } from '../../common/enums';
 
 @Injectable()
 export class AuthService {
+  // In-process per-phone hourly request log. Keys: phone → array of recent
+  // request timestamps (ms). Pruned on every check. Trade-offs:
+  //  - resets on server restart (fine for current single-node dev/prod);
+  //  - doesn't share across instances (revisit when we scale out);
+  //  - we count on EVERY call (registered or not) so the no-enumeration
+  //    response shape stays identical regardless of phone-existence.
+  private readonly recentRequests = new Map<string, number[]>();
+  private static readonly HOURLY_CAP = 5;
+  private static readonly HOUR_MS = 60 * 60 * 1000;
+
   constructor(
     @InjectRepository(OtpToken)
     private readonly otpRepo: Repository<OtpToken>,
@@ -31,15 +40,37 @@ export class AuthService {
     private readonly configService: ConfigService,
   ) {}
 
+  private checkHourlyCap(phone: string): void {
+    const now = Date.now();
+    const cutoff = now - AuthService.HOUR_MS;
+    const arr = (this.recentRequests.get(phone) ?? []).filter((t) => t > cutoff);
+    if (arr.length >= AuthService.HOURLY_CAP) {
+      throw new HttpException(
+        {
+          code: 'RATE_LIMITED',
+          message: 'Too many OTP requests. Try again later.',
+        },
+        HttpStatus.TOO_MANY_REQUESTS,
+      );
+    }
+    arr.push(now);
+    this.recentRequests.set(phone, arr);
+  }
+
   async requestRegisterOtp(
     phone: string,
   ): Promise<{ message: string; expiresIn: number }> {
+    // Count BEFORE the existence check so the response is identical for
+    // registered and unregistered phones (no account-enumeration leak).
+    this.checkHourlyCap(phone);
+
+    const otpTtl = this.configService.get<number>('OTP_TTL_SECONDS', 300);
     const existingUser = await this.userRepo.findOne({ where: { phone } });
     if (existingUser) {
-      throw new ConflictException({
-        code: 'PHONE_ALREADY_REGISTERED',
-        message: 'This phone number is already linked to an account',
-      });
+      // Phone is already registered. Don't issue an OTP, but return the same
+      // shape an unregistered phone would get. The verify step will fail with
+      // a generic "OTP expired" error — also non-leaking.
+      return { message: 'OTP sent', expiresIn: otpTtl };
     }
 
     return this.sendOtp(phone);
@@ -48,12 +79,14 @@ export class AuthService {
   async requestLoginOtp(
     phone: string,
   ): Promise<{ message: string; expiresIn: number }> {
+    this.checkHourlyCap(phone);
+
+    const otpTtl = this.configService.get<number>('OTP_TTL_SECONDS', 300);
     const existingUser = await this.userRepo.findOne({ where: { phone } });
     if (!existingUser) {
-      throw new NotFoundException({
-        code: 'PHONE_NOT_FOUND',
-        message: 'No account found with this phone number',
-      });
+      // No account for this phone. Don't issue an OTP, but return the same
+      // success shape so an attacker can't probe the user table.
+      return { message: 'OTP sent', expiresIn: otpTtl };
     }
 
     return this.sendOtp(phone);
@@ -62,9 +95,12 @@ export class AuthService {
   async verifyRegisterOtp(phone: string, code: string, full_name?: string, email?: string) {
     const existingUser = await this.userRepo.findOne({ where: { phone } });
     if (existingUser) {
-      throw new ConflictException({
-        code: 'PHONE_ALREADY_REGISTERED',
-        message: 'This phone number is already linked to an account',
+      // Already registered. Don't reveal that — fail with the generic
+      // invalid-OTP error (no real OTP was issued for this phone in the
+      // register flow, so verify can never succeed here anyway).
+      throw new UnauthorizedException({
+        code: 'INVALID_OTP',
+        message: 'Invalid OTP code',
       });
     }
 
@@ -74,9 +110,11 @@ export class AuthService {
   async verifyLoginOtp(phone: string, code: string) {
     const existingUser = await this.userRepo.findOne({ where: { phone } });
     if (!existingUser) {
-      throw new NotFoundException({
-        code: 'PHONE_NOT_FOUND',
-        message: 'No account found with this phone number',
+      // No account. Same generic error as a wrong code so an attacker can't
+      // distinguish "phone not registered" from "wrong code".
+      throw new UnauthorizedException({
+        code: 'INVALID_OTP',
+        message: 'Invalid OTP code',
       });
     }
 
