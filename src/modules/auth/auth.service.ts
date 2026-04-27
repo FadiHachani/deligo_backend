@@ -26,7 +26,9 @@ export class AuthService {
   //  - we count on EVERY call (registered or not) so the no-enumeration
   //    response shape stays identical regardless of phone-existence.
   private readonly recentRequests = new Map<string, number[]>();
-  private static readonly HOURLY_CAP = 5;
+  // 20/hour gives breathing room in dev/QA while still bounding spam. Tighten
+  // to 5 once SMS billing is live.
+  private static readonly HOURLY_CAP = 20;
   private static readonly HOUR_MS = 60 * 60 * 1000;
 
   constructor(
