@@ -283,16 +283,30 @@ export class BidsService {
       });
     }
     bid.status = BidStatus.WITHDRAWN;
-    const saved = await this.bidRepo.save(bid);
+    await this.bidRepo.save(bid);
+
+    // If no other active bids remain, return the request to OPEN so the
+    // client sees "looking for bids" again instead of a stale BIDDING status.
+    const activeBidCount = await this.bidRepo.count({
+      where: {
+        request_id: bid.request.id,
+        status: BidStatus.PENDING,
+      },
+    });
+    if (activeBidCount === 0 && bid.request.status === RequestStatus.BIDDING) {
+      await this.requestRepo.update(bid.request.id, {
+        status: RequestStatus.OPEN,
+      });
+    }
 
     await this.notificationsService.create(
       bid.request.client_id,
       'bid_withdrawn',
       'A bid was withdrawn',
-      'A driver has withdrawn their bid on your request.',
+      `request_id:${bid.request.id}`,
     );
 
-    return saved;
+    return bid;
   }
 
   // Client proposes a counter-offer on a driver's bid.
