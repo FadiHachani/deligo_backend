@@ -16,6 +16,7 @@ import { UsersService } from './users.service';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
 import { UpdateUserDto } from './dto/update-user.dto';
 import { ApplyAsDriverDto } from './dto/apply-driver.dto';
+import { ChangePhoneRequestDto, ChangePhoneVerifyDto } from './dto/change-phone.dto';
 import { Roles } from '../../common/decorators/roles.decorator';
 import { RolesGuard } from '../../common/guards/roles.guard';
 import { UserRole } from '../../common/enums';
@@ -57,6 +58,16 @@ export class UsersController {
     file: Express.Multer.File,
   ) {
     return this.usersService.uploadAvatar(user.sub, file);
+  }
+
+  @Post('me/phone/otp/request')
+  requestPhoneChangeOtp(@CurrentUser() user: JwtUser, @Body() dto: ChangePhoneRequestDto) {
+    return this.usersService.requestPhoneChangeOtp(user.sub, dto.new_phone);
+  }
+
+  @Post('me/phone/otp/verify')
+  verifyPhoneChangeOtp(@CurrentUser() user: JwtUser, @Body() dto: ChangePhoneVerifyDto) {
+    return this.usersService.verifyPhoneChangeOtp(user.sub, dto.new_phone, dto.code);
   }
 
   @Get('me/application-status')
