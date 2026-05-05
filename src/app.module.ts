@@ -20,6 +20,7 @@ import { BookingsModule } from './modules/bookings/bookings.module';
 import { TrackingModule } from './modules/tracking/tracking.module';
 import { RatingsModule } from './modules/ratings/ratings.module';
 import { NotificationsModule } from './modules/notifications/notifications.module';
+import { SupportModule } from './modules/support/support.module';
 import {
   User,
   DriverProfile,
@@ -81,6 +82,7 @@ import {
     TrackingModule,
     RatingsModule,
     NotificationsModule,
+    SupportModule,
   ],
   providers: [
     { provide: APP_FILTER, useClass: HttpExceptionFilter },

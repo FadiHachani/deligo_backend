@@ -58,6 +58,26 @@ class EnvironmentVariables {
   @Min(1)
   @Max(10)
   OTP_MAX_ATTEMPTS: number = 3;
+
+  @IsString()
+  declare SMTP_HOST: string;
+
+  @IsOptional()
+  @Transform(({ value }) => parseInt(value, 10))
+  @IsNumber()
+  SMTP_PORT: number = 587;
+
+  @IsString()
+  declare SMTP_USER: string;
+
+  @IsString()
+  declare SMTP_PASS: string;
+
+  @IsString()
+  declare SMTP_FROM: string;
+
+  @IsString()
+  declare SUPPORT_EMAIL: string;
 }
 
 export function validate(config: Record<string, unknown>) {
