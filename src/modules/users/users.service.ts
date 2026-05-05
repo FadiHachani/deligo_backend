@@ -68,9 +68,29 @@ export class UsersService {
 
   // ─── Phone change ─────────────────────────────────────────────────────────
 
+  private static readonly PHONE_CHANGE_COOLDOWN_DAYS = 15;
+
+  private checkPhoneChangeCooldown(user: { phone_changed_at: Date | null }): void {
+    if (!user.phone_changed_at) return;
+    const cooldownMs = UsersService.PHONE_CHANGE_COOLDOWN_DAYS * 24 * 60 * 60 * 1000;
+    const availableAt = new Date(user.phone_changed_at.getTime() + cooldownMs);
+    if (availableAt > new Date()) {
+      throw new HttpException(
+        {
+          code: 'PHONE_CHANGE_COOLDOWN',
+          message: `You can only change your phone number once every ${UsersService.PHONE_CHANGE_COOLDOWN_DAYS} days.`,
+          available_at: availableAt.toISOString(),
+        },
+        HttpStatus.TOO_MANY_REQUESTS,
+      );
+    }
+  }
+
   async requestPhoneChangeOtp(userId: string, newPhone: string): Promise<{ message: string; expiresIn: number }> {
     const user = await this.userRepo.findOne({ where: { id: userId } });
     if (!user) throw new NotFoundException('User not found');
+
+    this.checkPhoneChangeCooldown(user);
 
     if (user.phone === newPhone) {
       throw new ConflictException({
@@ -95,6 +115,10 @@ export class UsersService {
   async verifyPhoneChangeOtp(userId: string, newPhone: string, code: string) {
     const user = await this.userRepo.findOne({ where: { id: userId } });
     if (!user) throw new NotFoundException('User not found');
+
+    // Re-check cooldown — prevents a race where the first request was within
+    // the window but a second verify arrives after the window expired.
+    this.checkPhoneChangeCooldown(user);
 
     // Guard again in case a concurrent request claimed the number between
     // request and verify steps.
@@ -147,7 +171,7 @@ export class UsersService {
     }
 
     await this.otpRepo.delete({ id: otpToken.id });
-    await this.userRepo.update(userId, { phone: newPhone });
+    await this.userRepo.update(userId, { phone: newPhone, phone_changed_at: new Date() });
 
     return this.getMe(userId);
   }

@@ -35,6 +35,9 @@ export class User {
   @Column({ type: 'boolean', default: true })
   is_active: boolean;
 
+  @Column({ type: 'timestamptz', nullable: true, default: null })
+  phone_changed_at: Date | null;
+
   @CreateDateColumn({ type: 'timestamptz' })
   created_at: Date;
 
