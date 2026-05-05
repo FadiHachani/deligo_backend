@@ -59,6 +59,7 @@ class EnvironmentVariables {
   @Max(10)
   OTP_MAX_ATTEMPTS: number = 3;
 
+  @IsOptional()
   @IsString()
   declare SMTP_HOST: string;
 
@@ -67,15 +68,19 @@ class EnvironmentVariables {
   @IsNumber()
   SMTP_PORT: number = 587;
 
+  @IsOptional()
   @IsString()
   declare SMTP_USER: string;
 
+  @IsOptional()
   @IsString()
   declare SMTP_PASS: string;
 
+  @IsOptional()
   @IsString()
   declare SMTP_FROM: string;
 
+  @IsOptional()
   @IsString()
   declare SUPPORT_EMAIL: string;
 }
