@@ -7,6 +7,7 @@ import { DriverProfile } from '../../entities/driver-profile.entity';
 import { NotificationsModule } from '../notifications/notifications.module';
 import { RequestsModule } from '../requests/requests.module';
 import { TrackingModule } from '../tracking/tracking.module';
+import { UploadModule } from '../../common/upload/upload.module';
 
 @Module({
   imports: [
@@ -14,6 +15,7 @@ import { TrackingModule } from '../tracking/tracking.module';
     NotificationsModule,
     RequestsModule,
     TrackingModule,
+    UploadModule,
   ],
   controllers: [BookingsController],
   providers: [BookingsService],

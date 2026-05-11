@@ -32,6 +32,9 @@ export enum BidStatus {
 export enum BookingStatus {
   CONFIRMED = 'CONFIRMED',
   IN_TRANSIT = 'IN_TRANSIT',
+  // Driver has uploaded proof-of-delivery photo. Waiting on the client to
+  // upload their own confirmation photo (or for the 24h auto-confirm).
+  PENDING_CONFIRMATION = 'PENDING_CONFIRMATION',
   DELIVERED = 'DELIVERED',
   FAILED = 'FAILED',
 }

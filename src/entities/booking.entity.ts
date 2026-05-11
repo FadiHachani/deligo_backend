@@ -28,6 +28,23 @@ export class Booking {
   @Column({ type: 'timestamptz', nullable: true })
   delivered_at: Date | null;
 
+  // Driver-uploaded proof-of-delivery photo path (relative to uploads dir).
+  // Set when the driver moves IN_TRANSIT -> PENDING_CONFIRMATION.
+  @Column({ type: 'varchar', nullable: true })
+  driver_proof_photo: string | null;
+
+  @Column({ type: 'timestamptz', nullable: true })
+  driver_proof_at: Date | null;
+
+  // Client-uploaded confirmation photo path. Set when the client moves
+  // PENDING_CONFIRMATION -> DELIVERED. Remains null if the 24h auto-confirm
+  // sweep closes the booking instead.
+  @Column({ type: 'varchar', nullable: true })
+  client_confirmation_photo: string | null;
+
+  @Column({ type: 'timestamptz', nullable: true })
+  client_confirmed_at: Date | null;
+
   @ManyToOne(() => TransportRequest)
   @JoinColumn({ name: 'request_id' })
   request: TransportRequest;

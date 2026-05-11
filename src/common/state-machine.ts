@@ -10,7 +10,14 @@ const requestTransitions: Partial<Record<RequestStatus, RequestStatus[]>> = {
 
 const bookingTransitions: Partial<Record<BookingStatus, BookingStatus[]>> = {
   [BookingStatus.CONFIRMED]: [BookingStatus.IN_TRANSIT],
-  [BookingStatus.IN_TRANSIT]: [BookingStatus.DELIVERED, BookingStatus.FAILED],
+  // IN_TRANSIT can still go directly to FAILED (driver flags an issue). For
+  // the happy path, the driver uploads proof which moves us to
+  // PENDING_CONFIRMATION; the client then confirms to reach DELIVERED.
+  [BookingStatus.IN_TRANSIT]: [
+    BookingStatus.PENDING_CONFIRMATION,
+    BookingStatus.FAILED,
+  ],
+  [BookingStatus.PENDING_CONFIRMATION]: [BookingStatus.DELIVERED],
 };
 
 export function assertTransition(
