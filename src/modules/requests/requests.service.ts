@@ -66,62 +66,112 @@ export class RequestsService {
   }
 
   async list(userId: string, role: UserRole, dto: ListRequestsDto) {
-    const { status, page, limit } = dto;
+    const { status, page, limit, nearby_lat, nearby_lng, k } = dto;
 
-    const qb = this.requestRepo
-      .createQueryBuilder('req')
-      .leftJoinAndSelect('req.client', 'client')
-      .orderBy('req.created_at', 'DESC');
+    // Shared builder factory — we may run multiple times when auto-expanding
+    // the geo radius, so the base WHERE clauses are reapplied per attempt.
+    const buildBaseQb = () => {
+      const qb = this.requestRepo
+        .createQueryBuilder('req')
+        .leftJoinAndSelect('req.client', 'client')
+        .orderBy('req.created_at', 'DESC');
 
-    if (role === UserRole.CLIENT) {
-      qb.where('req.client_id = :userId', { userId });
-    } else if (role === UserRole.DRIVER) {
-      qb.where('req.status IN (:...statuses)', {
-        statuses: [RequestStatus.OPEN, RequestStatus.BIDDING],
-      });
-    }
-    // ADMIN: no filter
+      if (role === UserRole.CLIENT) {
+        qb.where('req.client_id = :userId', { userId });
+      } else if (role === UserRole.DRIVER) {
+        qb.where('req.status IN (:...statuses)', {
+          statuses: [RequestStatus.OPEN, RequestStatus.BIDDING],
+        });
+      }
+      // ADMIN: no filter
 
-    if (status) {
-      if (role === UserRole.DRIVER) {
-        // override open/bidding filter with explicit status if provided
-        qb.andWhere('req.status = :status', { status });
-      } else {
+      if (status) {
         qb.andWhere('req.status = :status', { status });
       }
+      return qb;
+    };
+
+    // Drivers can opt into a nearby filter by passing nearby_lat+nearby_lng.
+    // We resolve the driver's H3 cell and require the request's pickup cell
+    // to be within a kRing of it. Anchor is computed once per call.
+    const driverAnchorH3 =
+      role === UserRole.DRIVER && nearby_lat != null && nearby_lng != null
+        ? this.h3Service.latLngToH3(nearby_lat, nearby_lng, H3_RESOLUTION_FINE)
+        : null;
+
+    // For nearby queries, auto-expand the search radius until we find
+    // something or hit the cap. Each step roughly doubles the area; the
+    // ladder gives the UI a small set of distinct "zoom levels" to display
+    // ("expanded to ~2 km"). The starting k is whatever the client asked
+    // for; we only move up from there.
+    const K_LADDER = [2, 4, 6, 8];
+    const expansionSteps = driverAnchorH3
+      ? K_LADDER.filter((step) => step >= k)
+      : [k];
+
+    let items: TransportRequest[] = [];
+    let total = 0;
+    let kUsed = k;
+
+    for (const candidateK of expansionSteps) {
+      const qb = buildBaseQb();
+      if (driverAnchorH3) {
+        const ring = this.h3Service.getKRing(driverAnchorH3, candidateK);
+        qb.andWhere('req.pickup_h3_index IN (:...ring)', { ring });
+      }
+      total = await qb.getCount();
+      items = await qb
+        .skip((page - 1) * limit)
+        .take(limit)
+        .getMany();
+      kUsed = candidateK;
+      // For non-nearby queries (no driverAnchorH3), the ladder is just [k]
+      // so the loop runs once. For nearby queries, stop at the first k that
+      // returns results.
+      if (!driverAnchorH3 || items.length > 0) break;
     }
 
-    const total = await qb.getCount();
-    const items = await qb
-      .skip((page - 1) * limit)
-      .take(limit)
-      .getMany();
-
-    // For drivers, compute h3 distance
+    // For drivers, attach H3 distance (relative to nearby anchor if provided,
+    // otherwise to the driver's stored current_h3_index).
     if (role === UserRole.DRIVER) {
-      const driverProfile = await this.driverProfileRepo.findOne({
-        where: { user_id: userId },
-      });
+      let anchorH3: string | null = driverAnchorH3;
+      if (!anchorH3) {
+        const driverProfile = await this.driverProfileRepo.findOne({
+          where: { user_id: userId },
+        });
+        anchorH3 = driverProfile?.current_h3_index ?? null;
+      }
+
+      const withDistance = items.map((r) => ({
+        ...r,
+        distance_h3: anchorH3
+          ? (() => {
+              try {
+                return this.h3Service.h3Distance(anchorH3!, r.pickup_h3_index);
+              } catch {
+                return null;
+              }
+            })()
+          : null,
+      }));
+
+      // If a nearby anchor was supplied, sort by distance ascending
+      // (closest first), null/error distances pushed to the end.
+      if (driverAnchorH3) {
+        withDistance.sort((a, b) => {
+          if (a.distance_h3 == null && b.distance_h3 == null) return 0;
+          if (a.distance_h3 == null) return 1;
+          if (b.distance_h3 == null) return -1;
+          return a.distance_h3 - b.distance_h3;
+        });
+      }
+
       return {
-        items: items.map((r) => ({
-          ...r,
-          distance_h3:
-            driverProfile?.current_h3_index
-              ? (() => {
-                  try {
-                    return this.h3Service.h3Distance(
-                      driverProfile.current_h3_index!,
-                      r.pickup_h3_index,
-                    );
-                  } catch {
-                    return null;
-                  }
-                })()
-              : null,
-        })),
+        items: withDistance,
         total,
         page,
         limit,
+        ...(driverAnchorH3 ? { k_used: kUsed } : {}),
       };
     }
 

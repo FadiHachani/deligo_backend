@@ -31,11 +31,20 @@ export class ResponseEnvelopeInterceptor implements NestInterceptor {
     return next.handle().pipe(
       map((data) => {
         if (isPaginated(data)) {
-          const { items, total, page, limit } = data;
+          const { items, total, page, limit, ...extras } = data as Record<
+            string,
+            unknown
+          > & PaginatedData<unknown>;
           return {
             success: true,
             data: items,
-            meta: { total, page, limit, totalPages: Math.ceil(total / limit) },
+            meta: {
+              total,
+              page,
+              limit,
+              totalPages: Math.ceil(total / limit),
+              ...extras,
+            },
           };
         }
         return { success: true, data };
