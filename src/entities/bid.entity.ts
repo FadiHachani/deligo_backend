@@ -12,7 +12,13 @@ import { TransportRequest } from './transport-request.entity';
 import { User } from './user.entity';
 
 @Entity('bids')
-@Index(['request_id', 'driver_id'], { unique: true })
+// Only enforce one active bid per (request, driver). A driver who withdrew
+// or was rejected can submit a fresh bid — withdrawn/rejected rows stay for
+// history without blocking the unique index.
+@Index(['request_id', 'driver_id'], {
+  unique: true,
+  where: "status NOT IN ('WITHDRAWN','REJECTED')",
+})
 export class Bid {
   @PrimaryGeneratedColumn('uuid')
   id: string;
