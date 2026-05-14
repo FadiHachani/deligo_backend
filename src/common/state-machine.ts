@@ -32,30 +32,34 @@ export function assertTransition(
   current: RequestStatus | BookingStatus,
   target: RequestStatus | BookingStatus,
 ): void {
-  const requestAllowed = requestTransitions[current as RequestStatus];
-  if (requestAllowed) {
-    if (!requestAllowed.includes(target as RequestStatus)) {
-      throw new BadRequestException({
-        code: 'INVALID_STATUS_TRANSITION',
-        message: `Cannot transition from ${current} to ${target}`,
-      });
-    }
-    return;
+  // RequestStatus and BookingStatus share string values (e.g. "IN_TRANSIT"),
+  // so we can't pick the right table from `current` alone. The target is
+  // unambiguous: PENDING_CONFIRMATION/CONFIRMED only exist on BookingStatus,
+  // and OPEN/BIDDING/BOOKED only on RequestStatus. Use the target to pick
+  // the table; otherwise fall back to whichever table contains `current`.
+  const isBookingTarget = (Object.values(BookingStatus) as string[]).includes(
+    target as string,
+  );
+  const isRequestTarget = (Object.values(RequestStatus) as string[]).includes(
+    target as string,
+  );
+
+  let allowed: readonly string[] | undefined;
+  if (isBookingTarget && !isRequestTarget) {
+    allowed = bookingTransitions[current as BookingStatus];
+  } else if (isRequestTarget && !isBookingTarget) {
+    allowed = requestTransitions[current as RequestStatus];
+  } else {
+    // Target string lives in both enums — disambiguate by `current`.
+    allowed =
+      requestTransitions[current as RequestStatus] ??
+      bookingTransitions[current as BookingStatus];
   }
 
-  const bookingAllowed = bookingTransitions[current as BookingStatus];
-  if (bookingAllowed) {
-    if (!bookingAllowed.includes(target as BookingStatus)) {
-      throw new BadRequestException({
-        code: 'INVALID_STATUS_TRANSITION',
-        message: `Cannot transition from ${current} to ${target}`,
-      });
-    }
-    return;
+  if (!allowed || !allowed.includes(target as string)) {
+    throw new BadRequestException({
+      code: 'INVALID_STATUS_TRANSITION',
+      message: `Cannot transition from ${current} to ${target}`,
+    });
   }
-
-  throw new BadRequestException({
-    code: 'INVALID_STATUS_TRANSITION',
-    message: `Cannot transition from ${current} to ${target}`,
-  });
 }
