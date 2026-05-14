@@ -45,8 +45,31 @@ export class BidsService {
       });
     }
 
+    // Only active bids block re-bidding. A driver who withdrew (or had their
+    // bid rejected) should be able to submit a fresh offer.
     const existingBid = await this.bidRepo.findOne({
-      where: { request_id: dto.request_id, driver_id: driverId },
+      where: [
+        {
+          request_id: dto.request_id,
+          driver_id: driverId,
+          status: BidStatus.PENDING,
+        },
+        {
+          request_id: dto.request_id,
+          driver_id: driverId,
+          status: BidStatus.COUNTERED_BY_CLIENT,
+        },
+        {
+          request_id: dto.request_id,
+          driver_id: driverId,
+          status: BidStatus.COUNTERED_BY_DRIVER,
+        },
+        {
+          request_id: dto.request_id,
+          driver_id: driverId,
+          status: BidStatus.ACCEPTED,
+        },
+      ],
     });
     if (existingBid) {
       throw new BadRequestException({
