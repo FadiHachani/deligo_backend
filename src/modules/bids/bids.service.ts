@@ -5,7 +5,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { DataSource, Repository } from 'typeorm';
+import { DataSource, In, Repository } from 'typeorm';
 import { Bid } from '../../entities/bid.entity';
 import { TransportRequest } from '../../entities/transport-request.entity';
 import { Booking } from '../../entities/booking.entity';
@@ -272,14 +272,40 @@ export class BidsService {
     if (!bid) throw new NotFoundException('Bid not found');
     if (bid.request.client_id !== clientId)
       throw new ForbiddenException('Access denied');
-    if (bid.status !== BidStatus.PENDING) {
+    // Client can reject any live bid — fresh, mid-negotiation, or after the
+    // driver has countered back. Already-settled states (ACCEPTED, REJECTED,
+    // WITHDRAWN) are no-ops as far as the client is concerned.
+    const rejectable: BidStatus[] = [
+      BidStatus.PENDING,
+      BidStatus.COUNTERED_BY_CLIENT,
+      BidStatus.COUNTERED_BY_DRIVER,
+    ];
+    if (!rejectable.includes(bid.status)) {
       throw new BadRequestException({
-        code: 'BID_NOT_PENDING',
-        message: 'Only pending bids can be rejected',
+        code: 'BID_NOT_REJECTABLE',
+        message: `Bid in status ${bid.status} cannot be rejected`,
       });
     }
     bid.status = BidStatus.REJECTED;
     const saved = await this.bidRepo.save(bid);
+
+    // Same revert as withdraw: if this was the last live bid, drop the
+    // request back to OPEN so the client's UI reflects "no bids yet".
+    const activeBidCount = await this.bidRepo.count({
+      where: {
+        request_id: bid.request.id,
+        status: In([
+          BidStatus.PENDING,
+          BidStatus.COUNTERED_BY_CLIENT,
+          BidStatus.COUNTERED_BY_DRIVER,
+        ]),
+      },
+    });
+    if (activeBidCount === 0 && bid.request.status === RequestStatus.BIDDING) {
+      await this.requestRepo.update(bid.request.id, {
+        status: RequestStatus.OPEN,
+      });
+    }
 
     await this.notificationsService.create(
       bid.driver_id,
@@ -299,10 +325,18 @@ export class BidsService {
     if (!bid) throw new NotFoundException('Bid not found');
     if (bid.driver_id !== driverId)
       throw new ForbiddenException('Access denied');
-    if (bid.status !== BidStatus.PENDING) {
+    // Driver can withdraw any bid that hasn't reached a terminal state — fresh,
+    // mid-negotiation (either side has countered), or post-driver-counter. Once
+    // ACCEPTED/REJECTED/WITHDRAWN the bid is settled and withdrawal is a no-op.
+    const withdrawable: BidStatus[] = [
+      BidStatus.PENDING,
+      BidStatus.COUNTERED_BY_CLIENT,
+      BidStatus.COUNTERED_BY_DRIVER,
+    ];
+    if (!withdrawable.includes(bid.status)) {
       throw new BadRequestException({
-        code: 'BID_NOT_PENDING',
-        message: 'Only pending bids can be withdrawn',
+        code: 'BID_NOT_WITHDRAWABLE',
+        message: `Bid in status ${bid.status} cannot be withdrawn`,
       });
     }
     bid.status = BidStatus.WITHDRAWN;
@@ -310,10 +344,15 @@ export class BidsService {
 
     // If no other active bids remain, return the request to OPEN so the
     // client sees "looking for bids" again instead of a stale BIDDING status.
+    // "Active" includes mid-negotiation states, not just PENDING.
     const activeBidCount = await this.bidRepo.count({
       where: {
         request_id: bid.request.id,
-        status: BidStatus.PENDING,
+        status: In([
+          BidStatus.PENDING,
+          BidStatus.COUNTERED_BY_CLIENT,
+          BidStatus.COUNTERED_BY_DRIVER,
+        ]),
       },
     });
     if (activeBidCount === 0 && bid.request.status === RequestStatus.BIDDING) {
