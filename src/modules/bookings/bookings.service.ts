@@ -369,11 +369,19 @@ export class BookingsService {
     }
   }
 
-  async fail(bookingId: string, driverId: string) {
+  async fail(
+    bookingId: string,
+    driverId: string,
+    reason: { code: string; text?: string },
+  ) {
     const booking = await this.getBookingForDriver(bookingId, driverId);
     assertTransition(booking.status, BookingStatus.FAILED);
 
     booking.status = BookingStatus.FAILED;
+    booking.cancel_reason_code = reason.code;
+    booking.cancel_reason_text = reason.text ?? null;
+    booking.cancelled_by = driverId;
+    booking.cancelled_at = new Date();
     await this.bookingRepo.save(booking);
 
     await this.requestsService.updateStatus(
@@ -388,8 +396,54 @@ export class BookingsService {
       `Unfortunately, your delivery could not be completed.`,
     );
 
-    console.log(`[BOOKING] Booking ${bookingId} failed`);
+    console.log(`[BOOKING] Booking ${bookingId} failed (${reason.code})`);
     this.emitStatusChange(bookingId, BookingStatus.FAILED);
+    return booking;
+  }
+
+  // Client backs out of a confirmed booking before the driver starts the
+  // trip. Booking transitions CONFIRMED -> CANCELLED and the underlying
+  // request reverts to CANCELLED too (the booking was the realization of
+  // the request — pulling out unwinds both).
+  async cancel(
+    bookingId: string,
+    clientId: string,
+    reason: { code: string; text?: string },
+  ) {
+    const booking = await this.bookingRepo.findOne({
+      where: { id: bookingId },
+    });
+    if (!booking) {
+      throw new BadRequestException('Booking not found');
+    }
+    if (booking.client_id !== clientId) {
+      throw new BadRequestException('Access denied');
+    }
+    assertTransition(booking.status, BookingStatus.CANCELLED);
+
+    booking.status = BookingStatus.CANCELLED;
+    booking.cancel_reason_code = reason.code;
+    booking.cancel_reason_text = reason.text ?? null;
+    booking.cancelled_by = clientId;
+    booking.cancelled_at = new Date();
+    await this.bookingRepo.save(booking);
+
+    await this.requestsService.updateStatus(
+      booking.request_id,
+      RequestStatus.CANCELLED,
+    );
+
+    await this.notificationsService.create(
+      booking.driver_id,
+      'booking_cancelled',
+      'Booking cancelled',
+      'The client cancelled the booking before pickup.',
+    );
+
+    console.log(
+      `[BOOKING] Booking ${bookingId} cancelled by client (${reason.code})`,
+    );
+    this.emitStatusChange(bookingId, BookingStatus.CANCELLED);
     return booking;
   }
 

@@ -31,10 +31,19 @@ export class RatingsService {
       where: { id: dto.booking_id },
     });
     if (!booking) throw new NotFoundException('Booking not found');
-    if (booking.status !== BookingStatus.DELIVERED) {
+    // Allow rating after any terminal state — DELIVERED (happy path),
+    // CANCELLED (client backed out post-booking), or FAILED (driver flagged).
+    // Both sides get a chance to rate the experience even when it didn't end
+    // in a delivery, which is important for catching bad actors.
+    const terminal: BookingStatus[] = [
+      BookingStatus.DELIVERED,
+      BookingStatus.CANCELLED,
+      BookingStatus.FAILED,
+    ];
+    if (!terminal.includes(booking.status)) {
       throw new BadRequestException({
-        code: 'BOOKING_NOT_DELIVERED',
-        message: 'Can only rate completed deliveries',
+        code: 'BOOKING_NOT_TERMINAL',
+        message: 'Can only rate bookings that have ended',
       });
     }
 

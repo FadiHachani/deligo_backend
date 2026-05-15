@@ -3,9 +3,10 @@ import {
   ForbiddenException,
   Injectable,
   NotFoundException,
+  OnModuleInit,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { In, LessThan, Repository } from 'typeorm';
+import { In, Repository } from 'typeorm';
 import { TransportRequest } from '../../entities/transport-request.entity';
 import { DriverProfile } from '../../entities/driver-profile.entity';
 import { Bid } from '../../entities/bid.entity';
@@ -22,7 +23,7 @@ import { NotificationsService } from '../notifications/notifications.service';
 const STALE_REQUEST_AFTER_MS = 15 * 24 * 60 * 60 * 1000;
 
 @Injectable()
-export class RequestsService {
+export class RequestsService implements OnModuleInit {
   private sweepInFlight = false;
 
   constructor(
@@ -36,6 +37,31 @@ export class RequestsService {
     private readonly uploadService: UploadService,
     private readonly notificationsService: NotificationsService,
   ) {}
+
+  // One-shot backfill: rows created before the last_activity_at column was
+  // added get NULL, which makes the inactivity sweep's < cutoff predicate
+  // false (NULL is unknown). Seed those rows with created_at so they're
+  // treated as having "no activity since creation" — which is the truth.
+  // Idempotent: only touches rows where last_activity_at IS NULL.
+  async onModuleInit(): Promise<void> {
+    try {
+      const result = await this.requestRepo
+        .createQueryBuilder()
+        .update(TransportRequest)
+        .set({ last_activity_at: () => 'created_at' })
+        .where('last_activity_at IS NULL')
+        .execute();
+      if (result.affected) {
+        console.log(
+          `[REQUEST] Backfilled last_activity_at on ${result.affected} legacy rows`,
+        );
+      }
+    } catch (err) {
+      // Non-fatal — the column may not exist yet on first deploy when
+      // migrations haven't run. Sweep is defensive (see NULL-safe WHERE).
+      console.error('[REQUEST] last_activity_at backfill failed:', err);
+    }
+  }
 
   // Fire-and-forget sweep trigger — same opportunistic pattern as the
   // bookings auto-confirm sweep. Reads kick it; the work runs next tick.
@@ -57,13 +83,21 @@ export class RequestsService {
   // wins and the loser's affected = 0 short-circuits side effects.
   private async sweepStaleRequests(): Promise<void> {
     const cutoff = new Date(Date.now() - STALE_REQUEST_AFTER_MS);
-    const candidates = await this.requestRepo.find({
-      where: [
-        { status: RequestStatus.OPEN, last_activity_at: LessThan(cutoff) },
-        { status: RequestStatus.BIDDING, last_activity_at: LessThan(cutoff) },
-      ],
-      take: 50,
-    });
+    // NULL-safe predicate: a NULL last_activity_at means the column was
+    // never populated (legacy row), in which case fall back to created_at.
+    // The OnModuleInit backfill should have eliminated NULLs, but we belt-
+    // and-suspenders here so the sweep can't accidentally hit a NULL row.
+    const candidates = await this.requestRepo
+      .createQueryBuilder('req')
+      .where('req.status IN (:...statuses)', {
+        statuses: [RequestStatus.OPEN, RequestStatus.BIDDING],
+      })
+      .andWhere(
+        'COALESCE(req.last_activity_at, req.created_at) < :cutoff',
+        { cutoff },
+      )
+      .take(50)
+      .getMany();
 
     for (const candidate of candidates) {
       try {

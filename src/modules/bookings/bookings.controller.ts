@@ -1,5 +1,6 @@
 import {
   BadRequestException,
+  Body,
   Controller,
   Get,
   Param,
@@ -18,6 +19,7 @@ import { Roles } from '../../common/decorators/roles.decorator';
 import { RolesGuard } from '../../common/guards/roles.guard';
 import { UserRole } from '../../common/enums';
 import { ListBookingsDto } from './dto/list-bookings.dto';
+import { CancelBookingDto } from './dto/cancel-booking.dto';
 
 // Single proof-or-confirmation photo validators. Drivers and clients both
 // hit upload endpoints with one image; constraints match the item-photo
@@ -87,7 +89,31 @@ export class BookingsController {
 
   @Patch(':id/fail')
   @UseGuards(ApprovedDriverGuard)
-  fail(@Param('id') id: string, @CurrentUser() user: JwtUser) {
-    return this.bookingsService.fail(id, user.sub);
+  fail(
+    @Param('id') id: string,
+    @CurrentUser() user: JwtUser,
+    @Body() dto: CancelBookingDto,
+  ) {
+    return this.bookingsService.fail(id, user.sub, {
+      code: dto.reason_code,
+      text: dto.reason_text,
+    });
+  }
+
+  // Client backs out post-booking, pre-transit. Reason is required so the
+  // driver gets meaningful feedback and we can aggregate cancellation
+  // causes for product analytics.
+  @Patch(':id/cancel')
+  @UseGuards(RolesGuard)
+  @Roles(UserRole.CLIENT)
+  cancel(
+    @Param('id') id: string,
+    @CurrentUser() user: JwtUser,
+    @Body() dto: CancelBookingDto,
+  ) {
+    return this.bookingsService.cancel(id, user.sub, {
+      code: dto.reason_code,
+      text: dto.reason_text,
+    });
   }
 }

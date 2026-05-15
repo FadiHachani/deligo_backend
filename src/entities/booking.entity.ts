@@ -45,6 +45,23 @@ export class Booking {
   @Column({ type: 'timestamptz', nullable: true })
   client_confirmed_at: Date | null;
 
+  // Cancellation / failure metadata. Populated when status flips to
+  // CANCELLED (client backed out post-booking) or FAILED (driver flagged
+  // the trip). `cancel_reason_code` is one of the preset codes from the UI
+  // picker; `cancel_reason_text` carries the optional free-text comment.
+  // `cancelled_by` records which user (driver or client) initiated it.
+  @Column({ type: 'varchar', nullable: true })
+  cancel_reason_code: string | null;
+
+  @Column({ type: 'text', nullable: true })
+  cancel_reason_text: string | null;
+
+  @Column({ type: 'uuid', nullable: true })
+  cancelled_by: string | null;
+
+  @Column({ type: 'timestamptz', nullable: true })
+  cancelled_at: Date | null;
+
   @ManyToOne(() => TransportRequest)
   @JoinColumn({ name: 'request_id' })
   request: TransportRequest;

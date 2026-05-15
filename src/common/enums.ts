@@ -37,4 +37,8 @@ export enum BookingStatus {
   PENDING_CONFIRMATION = 'PENDING_CONFIRMATION',
   DELIVERED = 'DELIVERED',
   FAILED = 'FAILED',
+  // Client backed out post-booking but pre-transit. Driver should be
+  // notified and the underlying request reverts to OPEN (or stays
+  // CANCELLED if the client truly walked away).
+  CANCELLED = 'CANCELLED',
 }

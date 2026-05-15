@@ -84,15 +84,32 @@ export class BidsService {
       });
     }
 
-    const bid = await this.bidRepo.save(
-      this.bidRepo.create({
-        request_id: dto.request_id,
-        driver_id: driverId,
-        price_tnd: dto.price_tnd,
-        eta_minutes: dto.eta_minutes,
-        message: dto.message ?? null,
-      }),
-    );
+    // The existingBid SELECT above is racey with concurrent taps. The
+    // partial unique index on (request_id, driver_id) for non-terminal
+    // statuses catches the race at the DB level — we translate the
+    // Postgres unique-violation (23505) back to the friendly error code so
+    // the client gets a consistent shape regardless of which writer wins.
+    let bid: Bid;
+    try {
+      bid = await this.bidRepo.save(
+        this.bidRepo.create({
+          request_id: dto.request_id,
+          driver_id: driverId,
+          price_tnd: dto.price_tnd,
+          eta_minutes: dto.eta_minutes,
+          message: dto.message ?? null,
+        }),
+      );
+    } catch (err: unknown) {
+      const code = (err as { code?: string })?.code;
+      if (code === '23505') {
+        throw new BadRequestException({
+          code: 'ALREADY_BID',
+          message: 'You have already placed a bid on this request',
+        });
+      }
+      throw err;
+    }
 
     // Transition OPEN → BIDDING on first bid
     if (request.status === RequestStatus.OPEN) {
