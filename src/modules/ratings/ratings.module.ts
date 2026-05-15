@@ -5,9 +5,10 @@ import { RatingsService } from './ratings.service';
 import { Rating } from '../../entities/rating.entity';
 import { Booking } from '../../entities/booking.entity';
 import { DriverProfile } from '../../entities/driver-profile.entity';
+import { User } from '../../entities/user.entity';
 
 @Module({
-  imports: [TypeOrmModule.forFeature([Rating, Booking, DriverProfile])],
+  imports: [TypeOrmModule.forFeature([Rating, Booking, DriverProfile, User])],
   controllers: [RatingsController],
   providers: [RatingsService],
   exports: [RatingsService],

@@ -120,10 +120,36 @@ export class BidsService {
     return bid;
   }
 
-  async list(userId: string, role: UserRole, requestId: string) {
+  async list(userId: string, role: UserRole, requestId?: string) {
+    // Driver, no request_id → "my active bids across every request" feed,
+    // used by the home screen's active-bids list. Includes the request +
+    // request.client so the UI can render pickup/dropoff/client avatar
+    // without a second round-trip per bid.
+    if (role === UserRole.DRIVER && !requestId) {
+      return this.bidRepo
+        .createQueryBuilder('bid')
+        .leftJoinAndSelect('bid.request', 'request')
+        .leftJoinAndSelect('request.client', 'client')
+        .where('bid.driver_id = :userId', { userId })
+        .andWhere('bid.status IN (:...statuses)', {
+          statuses: [
+            BidStatus.PENDING,
+            BidStatus.COUNTERED_BY_CLIENT,
+            BidStatus.COUNTERED_BY_DRIVER,
+          ],
+        })
+        .orderBy('bid.created_at', 'DESC')
+        .getMany();
+    }
+
+    if (!requestId) {
+      throw new BadRequestException('request_id is required');
+    }
+
     const qb = this.bidRepo
       .createQueryBuilder('bid')
       .leftJoinAndSelect('bid.driver', 'driver')
+      .leftJoinAndSelect('driver.driver_profile', 'driver_profile')
       .where('bid.request_id = :requestId', { requestId });
 
     if (role === UserRole.DRIVER) {

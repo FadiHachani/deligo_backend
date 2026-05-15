@@ -9,6 +9,7 @@ import { Repository } from 'typeorm';
 import { Rating } from '../../entities/rating.entity';
 import { Booking } from '../../entities/booking.entity';
 import { DriverProfile } from '../../entities/driver-profile.entity';
+import { User } from '../../entities/user.entity';
 import { BookingStatus } from '../../common/enums';
 import { CreateRatingDto } from './dto/create-rating.dto';
 
@@ -21,6 +22,8 @@ export class RatingsService {
     private readonly bookingRepo: Repository<Booking>,
     @InjectRepository(DriverProfile)
     private readonly driverProfileRepo: Repository<DriverProfile>,
+    @InjectRepository(User)
+    private readonly userRepo: Repository<User>,
   ) {}
 
   async create(raterId: string, dto: CreateRatingDto) {
@@ -71,20 +74,31 @@ export class RatingsService {
       }),
     );
 
-    // Recalculate avg_rating for rated driver if they are a driver
+    // Recompute aggregates for whoever was just rated. We always update the
+    // User row (works for both clients and drivers), and additionally update
+    // the legacy DriverProfile.avg_rating for drivers so existing readers
+    // (which prefer driver_profile.avg_rating) keep working.
+    const aggregate = await this.ratingRepo
+      .createQueryBuilder('r')
+      .select('AVG(r.score)', 'avg')
+      .addSelect('COUNT(r.id)', 'count')
+      .where('r.rated_user_id = :userId', { userId: dto.rated_user_id })
+      .getRawOne<{ avg: string; count: string }>();
+
+    const avg = parseFloat(parseFloat(aggregate?.avg ?? '0').toFixed(2));
+    const total = parseInt(aggregate?.count ?? '0', 10);
+
+    await this.userRepo.update(dto.rated_user_id, {
+      avg_rating: avg,
+      total_ratings: total,
+    });
+
     const driverProfile = await this.driverProfileRepo.findOne({
       where: { user_id: dto.rated_user_id },
     });
     if (driverProfile) {
-      const result = await this.ratingRepo
-        .createQueryBuilder('r')
-        .select('AVG(r.score)', 'avg')
-        .where('r.rated_user_id = :userId', { userId: dto.rated_user_id })
-        .getRawOne<{ avg: string }>();
-
-      const avg = result?.avg ?? '0';
       await this.driverProfileRepo.update(driverProfile.id, {
-        avg_rating: parseFloat(parseFloat(avg).toFixed(2)),
+        avg_rating: avg,
       });
     }
 
