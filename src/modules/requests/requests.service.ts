@@ -5,20 +5,26 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { In, LessThan, Repository } from 'typeorm';
 import { TransportRequest } from '../../entities/transport-request.entity';
 import { DriverProfile } from '../../entities/driver-profile.entity';
 import { Bid } from '../../entities/bid.entity';
 import { H3Service, H3_RESOLUTION_FINE } from '../../common/h3/h3.service';
 import { UploadService } from '../../common/upload/upload.service';
-import { RequestStatus, UserRole } from '../../common/enums';
+import { BidStatus, RequestStatus, UserRole } from '../../common/enums';
 import { assertTransition } from '../../common/state-machine';
 import { CreateRequestDto } from './dto/create-request.dto';
 import { ListRequestsDto } from './dto/list-requests.dto';
 import { NotificationsService } from '../notifications/notifications.service';
 
+// A request that sits OPEN/BIDDING without any bid/counter activity for this
+// long is auto-failed by the opportunistic sweep below.
+const STALE_REQUEST_AFTER_MS = 15 * 24 * 60 * 60 * 1000;
+
 @Injectable()
 export class RequestsService {
+  private sweepInFlight = false;
+
   constructor(
     @InjectRepository(TransportRequest)
     private readonly requestRepo: Repository<TransportRequest>,
@@ -30,6 +36,92 @@ export class RequestsService {
     private readonly uploadService: UploadService,
     private readonly notificationsService: NotificationsService,
   ) {}
+
+  // Fire-and-forget sweep trigger — same opportunistic pattern as the
+  // bookings auto-confirm sweep. Reads kick it; the work runs next tick.
+  private kickSweep(): void {
+    if (this.sweepInFlight) return;
+    this.sweepInFlight = true;
+    setImmediate(async () => {
+      try {
+        await this.sweepStaleRequests();
+      } finally {
+        this.sweepInFlight = false;
+      }
+    });
+  }
+
+  // Auto-fail OPEN/BIDDING requests with no negotiation activity for
+  // STALE_REQUEST_AFTER_MS. Concurrent sweepers are safe: the conditional
+  // UPDATE only flips rows that are still OPEN/BIDDING, so the first writer
+  // wins and the loser's affected = 0 short-circuits side effects.
+  private async sweepStaleRequests(): Promise<void> {
+    const cutoff = new Date(Date.now() - STALE_REQUEST_AFTER_MS);
+    const candidates = await this.requestRepo.find({
+      where: [
+        { status: RequestStatus.OPEN, last_activity_at: LessThan(cutoff) },
+        { status: RequestStatus.BIDDING, last_activity_at: LessThan(cutoff) },
+      ],
+      take: 50,
+    });
+
+    for (const candidate of candidates) {
+      try {
+        const result = await this.requestRepo
+          .createQueryBuilder()
+          .update(TransportRequest)
+          .set({ status: RequestStatus.FAILED })
+          .where('id = :id AND status IN (:...expected)', {
+            id: candidate.id,
+            expected: [RequestStatus.OPEN, RequestStatus.BIDDING],
+          })
+          .execute();
+
+        if (!result.affected) continue;
+
+        // Notify the client and any drivers still mid-negotiation. We don't
+        // bother flipping bid rows to REJECTED here — the request being
+        // FAILED is the authoritative signal, and the existing bid status
+        // remains accurate as a historical record of where each driver was.
+        const activeBids = await this.bidRepo.find({
+          where: {
+            request_id: candidate.id,
+            status: In([
+              BidStatus.PENDING,
+              BidStatus.COUNTERED_BY_CLIENT,
+              BidStatus.COUNTERED_BY_DRIVER,
+            ]),
+          },
+        });
+
+        await Promise.all([
+          this.notificationsService.create(
+            candidate.client_id,
+            'request_expired',
+            'Request expired',
+            'Your request expired after 15 days without an agreement.',
+          ),
+          ...activeBids.map((b) =>
+            this.notificationsService.create(
+              b.driver_id,
+              'request_expired',
+              'Request expired',
+              'A request you bid on expired without an agreement.',
+            ),
+          ),
+        ]);
+
+        console.log(
+          `[REQUEST] Request ${candidate.id} auto-failed after 15d inactivity`,
+        );
+      } catch (err) {
+        console.error(
+          `[REQUEST] Inactivity sweep failed for ${candidate.id}:`,
+          err,
+        );
+      }
+    }
+  }
 
   async create(clientId: string, dto: CreateRequestDto, files: Express.Multer.File[]) {
     const pickup_h3_index = this.h3Service.latLngToH3(
@@ -66,6 +158,8 @@ export class RequestsService {
   }
 
   async list(userId: string, role: UserRole, dto: ListRequestsDto) {
+    // Opportunistic 15-day inactivity sweep — fire and forget.
+    this.kickSweep();
     const { status, page, limit, nearby_lat, nearby_lng, k } = dto;
 
     // Shared builder factory — we may run multiple times when auto-expanding
@@ -179,6 +273,7 @@ export class RequestsService {
   }
 
   async findOne(requestId: string, userId: string, role: UserRole) {
+    this.kickSweep();
     const req = await this.requestRepo.findOne({
       where: { id: requestId },
       relations: ['bids', 'bids.driver', 'bids.driver.driver_profile', 'client'],

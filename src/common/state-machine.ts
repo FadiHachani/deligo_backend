@@ -2,8 +2,16 @@ import { BadRequestException } from '@nestjs/common';
 import { RequestStatus, BookingStatus } from './enums';
 
 const requestTransitions: Partial<Record<RequestStatus, RequestStatus[]>> = {
-  [RequestStatus.OPEN]: [RequestStatus.BIDDING, RequestStatus.CANCELLED],
-  [RequestStatus.BIDDING]: [RequestStatus.BOOKED, RequestStatus.CANCELLED],
+  [RequestStatus.OPEN]: [
+    RequestStatus.BIDDING,
+    RequestStatus.CANCELLED,
+    RequestStatus.FAILED,
+  ],
+  [RequestStatus.BIDDING]: [
+    RequestStatus.BOOKED,
+    RequestStatus.CANCELLED,
+    RequestStatus.FAILED,
+  ],
   [RequestStatus.BOOKED]: [RequestStatus.IN_TRANSIT, RequestStatus.CANCELLED],
   [RequestStatus.IN_TRANSIT]: [RequestStatus.DELIVERED, RequestStatus.FAILED],
 };

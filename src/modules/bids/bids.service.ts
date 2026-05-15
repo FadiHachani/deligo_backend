@@ -29,6 +29,12 @@ export class BidsService {
     private readonly notificationsService: NotificationsService,
   ) {}
 
+  // Bumped on every negotiation action so the 15-day inactivity sweep
+  // (see requests.service) only fails requests that have actually gone idle.
+  private touchRequestActivity(requestId: string): Promise<unknown> {
+    return this.requestRepo.update(requestId, { last_activity_at: new Date() });
+  }
+
   async create(driverId: string, dto: CreateBidDto) {
     const request = await this.requestRepo.findOne({
       where: { id: dto.request_id },
@@ -93,7 +99,10 @@ export class BidsService {
       assertTransition(request.status, RequestStatus.BIDDING);
       await this.requestRepo.update(request.id, {
         status: RequestStatus.BIDDING,
+        last_activity_at: new Date(),
       });
+    } else {
+      await this.touchRequestActivity(request.id);
     }
 
     console.log(
@@ -304,7 +313,10 @@ export class BidsService {
     if (activeBidCount === 0 && bid.request.status === RequestStatus.BIDDING) {
       await this.requestRepo.update(bid.request.id, {
         status: RequestStatus.OPEN,
+        last_activity_at: new Date(),
       });
+    } else {
+      await this.touchRequestActivity(bid.request.id);
     }
 
     await this.notificationsService.create(
@@ -358,7 +370,10 @@ export class BidsService {
     if (activeBidCount === 0 && bid.request.status === RequestStatus.BIDDING) {
       await this.requestRepo.update(bid.request.id, {
         status: RequestStatus.OPEN,
+        last_activity_at: new Date(),
       });
+    } else {
+      await this.touchRequestActivity(bid.request.id);
     }
 
     await this.notificationsService.create(
@@ -398,6 +413,7 @@ export class BidsService {
     bid.counter_price_tnd = dto.counter_price_tnd;
     bid.driver_final_price_tnd = null;
     const saved = await this.bidRepo.save(bid);
+    await this.touchRequestActivity(bid.request_id);
 
     await this.notificationsService.create(
       bid.driver_id,
@@ -459,6 +475,7 @@ export class BidsService {
     bid.status = BidStatus.COUNTERED_BY_DRIVER;
     bid.driver_final_price_tnd = dto.driver_final_price_tnd;
     const saved = await this.bidRepo.save(bid);
+    await this.touchRequestActivity(bid.request_id);
 
     await this.notificationsService.create(
       bid.request.client_id,

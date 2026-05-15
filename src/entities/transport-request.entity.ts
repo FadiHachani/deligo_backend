@@ -63,6 +63,13 @@ export class TransportRequest {
   @CreateDateColumn({ type: 'timestamptz' })
   created_at: Date;
 
+  // Bumped on any negotiation activity (bid create, counter, reject, withdraw,
+  // accept). Used by the inactivity sweep to auto-fail requests that sit
+  // OPEN/BIDDING without progress for 15 days.
+  @Index()
+  @Column({ type: 'timestamptz', default: () => 'CURRENT_TIMESTAMP' })
+  last_activity_at: Date;
+
   @ManyToOne(() => User, (u) => u.transport_requests)
   @JoinColumn({ name: 'client_id' })
   client: User;
