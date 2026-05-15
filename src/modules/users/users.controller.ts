@@ -17,6 +17,7 @@ import { CurrentUser } from '../auth/decorators/current-user.decorator';
 import { UpdateUserDto } from './dto/update-user.dto';
 import { ApplyAsDriverDto } from './dto/apply-driver.dto';
 import { ChangePhoneRequestDto, ChangePhoneVerifyDto } from './dto/change-phone.dto';
+import { SetPushTokenDto } from './dto/push-token.dto';
 import { Roles } from '../../common/decorators/roles.decorator';
 import { RolesGuard } from '../../common/guards/roles.guard';
 import { UserRole } from '../../common/enums';
@@ -34,6 +35,13 @@ export class UsersController {
   @Patch('me')
   updateMe(@CurrentUser() user: JwtUser, @Body() dto: UpdateUserDto) {
     return this.usersService.updateMe(user.sub, dto);
+  }
+
+  // Register the device's Expo push token. Clients call this on cold start
+  // after permission is granted; passing null clears the token on logout.
+  @Post('me/push-token')
+  setPushToken(@CurrentUser() user: JwtUser, @Body() dto: SetPushTokenDto) {
+    return this.usersService.setPushToken(user.sub, dto.token ?? null);
   }
 
   @Post('me/apply-as-driver')

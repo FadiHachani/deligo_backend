@@ -38,6 +38,12 @@ export class User {
   @Column({ type: 'timestamptz', nullable: true, default: null })
   phone_changed_at: Date | null;
 
+  // Expo push token (ExponentPushToken[...]). Stored per-user so the backend
+  // can fan pushes out to whichever device(s) the user most recently signed
+  // in on. Cleared on logout; replaced on each app cold start.
+  @Column({ type: 'varchar', nullable: true })
+  push_token: string | null;
+
   // Aggregate ratings for any user (currently only clients are rated via this
   // field — drivers still use driver_profile.avg_rating which is preserved for
   // backwards compat). Maintained by RatingsService when a rating is saved.

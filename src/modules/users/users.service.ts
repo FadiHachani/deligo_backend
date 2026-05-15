@@ -52,6 +52,15 @@ export class UsersService {
     return this.getMe(userId);
   }
 
+  // Save the Expo push token issued for this device. Clients re-POST on every
+  // cold start so a stale token on a swapped device gets overwritten by the
+  // active session. Passing null (e.g. on logout) clears the token so future
+  // pushes are dropped instead of delivered to a signed-out device.
+  async setPushToken(userId: string, token: string | null) {
+    await this.userRepo.update(userId, { push_token: token });
+    return { ok: true };
+  }
+
   async uploadAvatar(userId: string, file: Express.Multer.File) {
     const user = await this.userRepo.findOne({ where: { id: userId } });
     if (!user) throw new NotFoundException('User not found');
