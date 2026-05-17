@@ -6,10 +6,13 @@ import {
   OnModuleInit,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { In, Repository } from 'typeorm';
+import { DataSource, In, Repository } from 'typeorm';
 import { TransportRequest } from '../../entities/transport-request.entity';
 import { DriverProfile } from '../../entities/driver-profile.entity';
 import { Bid } from '../../entities/bid.entity';
+import { Booking } from '../../entities/booking.entity';
+import { Rating } from '../../entities/rating.entity';
+import { TrackingEvent } from '../../entities/tracking-event.entity';
 import { H3Service, H3_RESOLUTION_FINE } from '../../common/h3/h3.service';
 import { UploadService } from '../../common/upload/upload.service';
 import { BidStatus, RequestStatus, UserRole } from '../../common/enums';
@@ -36,6 +39,7 @@ export class RequestsService implements OnModuleInit {
     private readonly h3Service: H3Service,
     private readonly uploadService: UploadService,
     private readonly notificationsService: NotificationsService,
+    private readonly dataSource: DataSource,
   ) {}
 
   // One-shot backfill: rows created before the last_activity_at column was
@@ -352,7 +356,11 @@ export class RequestsService implements OnModuleInit {
   }
 
   // Hard-delete: only allowed on already-CANCELLED requests owned by the
-  // caller. Bids attached to the request are removed first to satisfy the FK.
+  // caller. The FK graph is request → bids → bookings → (ratings,
+  // tracking_events), and none of the FKs declare ON DELETE CASCADE, so we
+  // clear the dependents bottom-up inside a single transaction. Without
+  // this, deleting a cancelled request that previously had an accepted bid
+  // (and therefore a booking row) fails with a foreign-key violation.
   // Photo files are unlinked from disk after the row is gone.
   async delete(requestId: string, clientId: string) {
     const req = await this.requestRepo.findOne({
@@ -368,10 +376,22 @@ export class RequestsService implements OnModuleInit {
       );
     }
 
-    if (req.bids?.length) {
-      await this.bidRepo.delete(req.bids.map((b) => b.id));
-    }
-    await this.requestRepo.delete(req.id);
+    await this.dataSource.transaction(async (manager) => {
+      const bookings = await manager.find(Booking, {
+        where: { request_id: req.id },
+        select: ['id'],
+      });
+      const bookingIds = bookings.map((b) => b.id);
+      if (bookingIds.length) {
+        await manager.delete(Rating, { booking_id: In(bookingIds) });
+        await manager.delete(TrackingEvent, { booking_id: In(bookingIds) });
+        await manager.delete(Booking, { id: In(bookingIds) });
+      }
+      if (req.bids?.length) {
+        await manager.delete(Bid, req.bids.map((b) => b.id));
+      }
+      await manager.delete(TransportRequest, req.id);
+    });
 
     for (const url of req.photo_urls ?? []) {
       try {
